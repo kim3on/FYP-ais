@@ -1,0 +1,50 @@
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# ── Virtual environment ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Trained model artefacts (large binary files — regenerate with training) ─
+app/artefacts/nsa_model.pkl
+app/artefacts/iso_model.pkl
+app/artefacts/preprocessor.pkl
+# Keep last_train_result.json so the dashboard shows results on clone
+# app/artefacts/last_train_result.json
+
+# ── Datasets (too large for GitHub — download from UNB separately) ─────────
+cicids2017/
+*.csv
+*.parquet
+*.pq
+# Exception: keep any sample/test CSVs you explicitly want tracked
+# !app/tests/sample.csv
+
+# ── Logs & temp ───────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+
+# ── OS & editor ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Secrets (never commit credentials) ────────────────────────────────────
+.env
+.env.*
+secrets.json

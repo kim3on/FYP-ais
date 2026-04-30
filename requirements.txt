@@ -1,0 +1,18 @@
+# ── Core API framework ──────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9   # multipart file uploads (/api/train, /api/detect)
+pydantic>=2.0.0
+
+# ── ML / Data science ───────────────────────────────────────────────────────
+scikit-learn>=1.3.0
+pandas>=2.0.0
+numpy>=1.24.0
+joblib>=1.3.0             # model serialisation (pickle wrapper)
+pyarrow>=14.0.0           # Parquet support for CIC-IDS-2017 datasets
+
+# ── Live packet capture (optional — only needed for /api/capture/*) ─────────
+# Requires root/admin privileges at runtime.
+# On Windows: install Npcap first → https://npcap.com/
+scapy>=2.5.0
+psutil>=5.9.0             # network interface enumeration

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIS-Detect — Network Anomaly Detection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="js/ais-detect.css">
+</head>
+<body>
+
+<!-- ════════════════════════════════
+     LOGIN
+════════════════════════════════ -->
+<div id="page-login" class="page active">
+  <div class="login-top-actions">
+    <button class="icon-btn" id="login-theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+  </div>
+
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 18 18" fill="none">
+          <polygon points="9,1.5 16.5,5.5 16.5,12.5 9,16.5 1.5,12.5 1.5,5.5" stroke="white" stroke-width="1.4" fill="rgba(255,255,255,0.14)"/>
+          <circle cx="9" cy="9" r="2.8" stroke="white" stroke-width="1.4" fill="none"/>
+          <circle cx="9" cy="9" r="0.9" fill="white"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">AIS-Detect</div>
+        <div class="brand-desc">Network Anomaly Detection System</div>
+      </div>
+    </div>
+
+    <h1 class="login-heading">Sign in</h1>
+    <p class="login-desc">Enter your credentials to access the system.</p>
+
+    <div class="f-group">
+      <label class="f-label">Username</label>
+      <input type="text" class="f-input" id="login-user" placeholder="admin" value="admin">
+    </div>
+    <div class="f-group">
+      <label class="f-label">Password</label>
+      <input type="password" class="f-input" id="login-pass" placeholder="Enter your password" value="password">
+    </div>
+
+    <button class="btn-login-submit" onclick="doLogin()">Sign In</button>
+    <div class="login-footer-note">Restricted access — authorized personnel only · v4.0</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════
+     APP
+════════════════════════════════ -->
+<div id="page-app" class="page">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <div class="s-brand-mark">
+        <svg viewBox="0 0 14 14" fill="none">
+          <polygon points="7,1 13,4 13,10 7,13 1,10 1,4" stroke="white" stroke-width="1.2" fill="rgba(255,255,255,0.14)"/>
+          <circle cx="7" cy="7" r="2" stroke="white" stroke-width="1.2" fill="none"/>
+          <circle cx="7" cy="7" r="0.7" fill="white"/>
+        </svg>
+      </div>
+      <div>
+        <div class="s-brand-name">AIS-Detect</div>
+        <div class="s-brand-ver">v4.0 · NSA Engine</div>
+      </div>
+    </div>
+
+    <div class="sidebar-nav">
+      <div class="nav-section-label">Main</div>
+
+      <div class="nav-item active" onclick="showPanel('dashboard',this)">
+        <svg class="nav-icon" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="1" y="1" width="5.5" height="5.5" rx="1"/>
+          <rect x="8.5" y="1" width="5.5" height="5.5" rx="1"/>
+          <rect x="1" y="8.5" width="5.5" height="5.5" rx="1"/>
+          <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1"/>
+        </svg>
+        Dashboard
+      </div>
+
+      <div class="nav-item" onclick="showPanel('training',this)">
+        <svg class="nav-icon" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4">
+          <circle cx="7.5" cy="7.5" r="2.5"/>
+          <path d="M7.5 1v1.5M7.5 12v1.5M1 7.5h1.5M12 7.5h1.5M3 3l1 1M11 11l1 1M11 3l-1 1M4 11l-1 1"/>
+        </svg>
+        AIS Training
+      </div>
+
+      <div class="nav-item" onclick="showPanel('alerts',this)">
+        <svg class="nav-icon" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M7.5 1A4.5 4.5 0 003 5.5c0 4-2.5 5-2.5 5h14s-2.5-1-2.5-5A4.5 4.5 0 007.5 1zM6 12a1.5 1.5 0 003 0"/>
+        </svg>
+        Alert Log
+        <span class="nav-badge">6</span>
+      </div>
+
+      <div class="nav-section-label" style="margin-top:12px;">System</div>
+
+      <div class="nav-item" onclick="showPanel('settings',this)">
+        <svg class="nav-icon" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.4">
+          <circle cx="7.5" cy="7.5" r="2"/>
+          <path d="M7.5 1v1.2M7.5 12.3v1.2M1 7.5h1.2M12.3 7.5h1.2M2.9 2.9l.85.85M11.25 11.25l.85.85M12.1 2.9l-.85.85M3.75 11.25l-.85.85"/>
+        </svg>
+        Settings
+      </div>
+    </div>
+
+    <div class="sidebar-foot">
+      <div class="user-row" onclick="showPanel('profile',null)">
+        <div class="user-av">A</div>
+        <div>
+          <div class="u-name">Admin1</div>
+          <div class="u-role">Network Administrator</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+
+    <div class="topbar">
+      <span class="topbar-title" id="topbar-title">Dashboard</span>
+      <div class="topbar-spacer"></div>
+      <div class="status-badge active" id="system-status">
+        <div class="status-dot"></div>System Active
+      </div>
+      <div style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);font-size:11px;">
+        <div id="conn-dot" style="width:6px;height:6px;border-radius:50%;background:var(--text-tertiary);"></div>
+        <span id="conn-label" style="color:var(--text-tertiary);">Connecting…</span>
+      </div>
+      <div class="topbar-clock" id="topbar-clock">00:00:00 UTC</div>
+      <button class="icon-btn" id="app-theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    </div>
+
+    <!-- ══ DASHBOARD ══ -->
+    <div class="panel active" id="panel-dashboard">
+      <div class="stats-row">
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Total Packets</span><div class="scard-ico blue"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 6.5h11M6.5 1v11"/></svg></div></div>
+          <div class="scard-val" id="stat-packets">—</div><div class="scard-sub">↓ updated live</div><div class="scard-bar blue"></div>
+        </div>
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Anomalies Detected</span><div class="scard-ico amber"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6.5 1L1 12h11L6.5 1zM6.5 5v3M6.5 9.5v1"/></svg></div></div>
+          <div class="scard-val" id="stat-anomalies">—</div><div class="scard-sub">updated every 5s</div><div class="scard-bar amber"></div>
+        </div>
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Critical Alerts</span><div class="scard-ico red"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M6.5 3.5v3M6.5 8.5v1"/></svg></div></div>
+          <div class="scard-val c-danger" id="stat-critical">—</div><div class="scard-sub">Immediate action required</div><div class="scard-bar red"></div>
+        </div>
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Active Antibodies</span><div class="scard-ico green"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M4 6.5l2 2 3.5-3.5"/></svg></div></div>
+          <div class="scard-val c-success" id="stat-antibodies">—</div><div class="scard-sub">Via negative selection</div><div class="scard-bar green"></div>
+        </div>
+      </div>
+
+      <div class="g2 mb-12">
+        <div class="card">
+          <div class="card-hd">
+            <div><div class="card-title">Live Network Traffic</div><div class="card-desc">Real-time packet monitoring</div></div>
+            <div class="legend">
+              <div class="leg-item"><div class="leg-dot" style="background:var(--accent)"></div>Normal</div>
+              <div class="leg-item"><div class="leg-dot" style="background:var(--danger)"></div>Anomaly</div>
+            </div>
+          </div>
+          <div class="card-bd" style="padding-bottom:10px;">
+            <div class="chart-box"><canvas id="traffic-chart" height="220"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-hd">
+            <div><div class="card-title">AIS Detector Space</div><div class="card-desc">Self vs Non-Self classification</div></div>
+            <div class="tab-row">
+              <button class="tab-btn active" onclick="setScatterView('visual',this)">Visual</button>
+              <button class="tab-btn" onclick="setScatterView('list',this)">List</button>
+            </div>
+          </div>
+          <div class="card-bd" style="padding-bottom:10px;">
+            <div id="scatter-visual"><div class="chart-box"><canvas id="scatter-canvas" height="220"></canvas></div></div>
+            <div id="scatter-list" style="display:none;">
+              <div class="tbl-wrap">
+                <table class="tbl">
+                  <thead><tr><th>Source IP</th><th>Port</th><th>Protocol</th><th>Severity</th></tr></thead>
+                  <tbody id="scatter-list-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live capture controls -->
+      <div class="card mt-12">
+        <div class="card-hd">
+          <div><div class="card-title">Live Packet Capture</div><div class="card-desc">Capture real network traffic and score each flow through the AIS model</div></div>
+          <div class="flex items-c gap-8">
+            <div style="display:inline-flex;align-items:center;gap:5px;font-size:11px;">
+              <div id="capture-status-dot" style="width:7px;height:7px;border-radius:50%;background:var(--text-tertiary);flex-shrink:0;"></div>
+              <span id="capture-status-label" style="color:var(--text-tertiary);">WebSocket Offline</span>
+            </div>
+            <button id="btn-capture-toggle" class="btn btn-accent btn-sm" onclick="toggleCapture()">▶ Start Live Capture</button>
+          </div>
+        </div>
+        <div class="card-bd" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <div class="flex gap-16 fs-12 mono" style="margin-left:auto;">
+            <span>Flows: <span class="fw-600 c-accent" id="live-flow-count">0</span></span>
+            <span>Anomalies detected: <span class="fw-600 c-danger" id="live-anom-count">0</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Flows Table -->
+      <div class="card mt-12" id="live-flows-card">
+        <div class="card-hd">
+          <div><div class="card-title">Live Flow Results</div><div class="card-desc">Real-time flows scored by AIS model — latest 50</div></div>
+          <button class="btn btn-default btn-sm" onclick="clearLiveFlows()">Clear</button>
+        </div>
+        <div class="tbl-wrap" style="max-height:260px;overflow-y:auto;">
+          <table class="tbl" id="live-flows-tbl">
+            <thead><tr><th>Time</th><th>Source IP</th><th>Dest IP</th><th>Port</th><th>Proto</th><th>Flows/Pkts</th><th>Bytes/s</th><th>Result</th></tr></thead>
+            <tbody id="live-flows-body"><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-tertiary);font-family:var(--font-mono);font-size:11px;">Waiting for capture to start…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card mt-12">
+        <div class="card-hd">
+          <div><div class="card-title">Recent Anomalies</div><div class="card-desc">Latest 5 detections</div></div>
+          <button class="btn btn-default btn-sm" onclick="showPanel('alerts',document.querySelectorAll('.nav-item')[2])">View all →</button>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Timestamp</th><th>Attack Type</th><th>Source IP</th><th>Destination IP</th><th>Protocol</th><th>Severity</th><th>Confidence</th></tr></thead>
+            <tbody id="recent-alerts-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ AIS TRAINING ══ -->
+    <div class="panel" id="panel-training">
+      <div class="g3 mb-12">
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Active Antibodies</span><div class="scard-ico blue"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M6.5 3.5v3l2 2"/></svg></div></div>
+          <div class="scard-val" id="train-antibodies">—</div><div class="scard-sub">Valid detectors stored</div><div class="scard-bar blue"></div>
+        </div>
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Training Accuracy</span><div class="scard-ico green"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M4 6.5l2 2 3.5-3.5"/></svg></div></div>
+          <div class="scard-val c-success" id="train-accuracy">—</div><div class="scard-sub">NSA · test-set accuracy</div><div class="scard-bar green"></div>
+        </div>
+        <div class="scard">
+          <div class="scard-top"><span class="scard-label">Current Dataset</span><div class="scard-ico amber"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="10" height="10" rx="1"/><path d="M4.5 6.5h4M4.5 4.5h4M4.5 8.5h2"/></svg></div></div>
+          <div class="scard-val" id="train-dataset-name" style="font-size:17px;padding-top:2px;">—</div><div class="scard-sub" id="train-dataset-records">No model trained yet</div><div class="scard-bar amber"></div>
+        </div>
+      </div>
+
+      <div class="g2">
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Dataset &amp; Configuration</div></div>
+          <div class="card-bd">
+            <div class="upload-zone mb-12" onclick="triggerFilePick()" id="upload-zone">
+              <input type="file" id="train-file-input" accept=".csv,.parquet,.pq" style="display:none" onchange="onFileSelected(this)">
+              <div class="upload-ico">
+                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12V6M9 6L6.5 8.5M9 6l2.5 2.5"/><path d="M3 13.5a3.5 3.5 0 010-7 4.5 4.5 0 019 0 2.5 2.5 0 010 5"/></svg>
+              </div>
+              <div class="upload-main">Upload training dataset</div>
+              <div class="upload-sub">CSV or Parquet · CIC-IDS2017, NSL-KDD, or custom</div>
+            </div>
+
+            <div class="fg">
+              <label class="flabel">Algorithm</label>
+              <select class="finput" id="train-algorithm"><option value="nsa">Negative Selection Algorithm (NSA)</option></select>
+            </div>
+            <div class="fg">
+              <label class="flabel">Detector Radius (r) — <span id="radius-val" class="c-accent">0.50</span></label>
+              <input type="range" id="train-radius" min="0.1" max="1.0" step="0.05" value="0.5" oninput="document.getElementById('radius-val').textContent=parseFloat(this.value).toFixed(2)">
+            </div>
+            <div class="fg">
+              <label class="flabel">Max Detectors (antibodies)</label>
+              <input type="number" id="train-max-detectors" class="finput" value="500" min="50" max="5000">
+            </div>
+            <div class="fg">
+              <label class="flabel">Max Attempts (candidate generations)</label>
+              <input type="number" id="train-max-attempts" class="finput" value="10000" min="1000" max="100000">
+            </div>
+            <div class="fg">
+              <label class="flabel">IsoForest Contamination — <span id="contam-val" class="c-accent">0.05</span></label>
+              <input type="range" id="train-contamination" min="0.01" max="0.3" step="0.01" value="0.05" oninput="document.getElementById('contam-val').textContent=parseFloat(this.value).toFixed(2)">
+            </div>
+            <button class="btn btn-accent btn-full mt-12" id="btn-start-training" onclick="startTraining()">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><polygon points="3,2 10,6 3,10" fill="currentColor"/></svg>
+              Start Training
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">Execution Log</div>
+            <div class="flex items-c gap-8">
+              <span class="fs-11 c-secondary">Progress</span>
+              <span class="fs-11 mono c-accent" id="progress-pct">0%</span>
+            </div>
+          </div>
+          <div class="card-bd">
+            <div class="prog-wrap mb-12"><div class="prog-fill" id="progress-fill" style="width:0%"></div></div>
+            <div class="terminal" id="training-log">
+              <div><span class="log-ts">—</span><span class="log-info">AIS-Detect v4.0 ready. Select a dataset and click Start Training.</span></div>
+            </div>
+            <div class="div"></div>
+            <div class="fs-12 c-secondary fw-500 mb-8">Pre-Training Validation</div>
+            <div class="flex gap-12 fs-12 mono">
+              <span>Total: <span class="fw-600" id="train-val-total">—</span></span>
+              <span>Normal: <span class="c-success fw-600" id="train-val-normal">—</span></span>
+              <span>Attack: <span class="c-danger fw-600" id="train-val-attack">—</span></span>
+            </div>
+            <div class="div"></div>
+            <div class="fs-12 c-secondary fw-500 mb-8">Test Against Trained Model</div>
+            <input type="file" id="detect-file-input" accept=".csv,.parquet,.pq" style="display:none" onchange="onDetectFileSelected(this)">
+            <div id="detect-upload-zone" class="upload-zone" onclick="triggerDetectPick()" style="padding:16px 14px;">
+              <div class="upload-ico" style="width:28px;height:28px;margin-bottom:7px;">
+                <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="7.5"/><path d="M6 9l2 2 4-4"/></svg>
+              </div>
+              <div class="upload-main" style="font-size:12px;">Upload attack test file</div>
+              <div class="upload-sub">CSV or Parquet · CIC-IDS2017 attack files</div>
+            </div>
+            <div id="detect-running" style="display:none;">
+              <div class="card-hd" style="padding:10px 0 6px;">
+                <div class="card-title" style="font-size:12px;">Detection Log</div>
+                <div class="flex items-c gap-8">
+                  <span class="fs-11 c-secondary">Progress</span>
+                  <span class="fs-11 mono c-accent" id="detect-progress-pct">0%</span>
+                </div>
+              </div>
+              <div class="prog-wrap mb-8"><div class="prog-fill" id="detect-progress" style="width:0%;transition:width 1.5s ease;"></div></div>
+              <div class="terminal" id="detect-log" style="height:160px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Results Panel -->
+    <div class="card mt-12" id="detect-results-card" style="display:none;">
+      <div class="card-hd">
+        <div><div class="card-title">Detection Test Results</div><div class="card-desc" id="detect-results-filename">—</div></div>
+        <div class="flex items-c gap-8">
+          <button class="btn btn-default btn-sm" onclick="exportDetectResults()">&#8659; Export CSV</button>
+          <button class="btn btn-default btn-sm" onclick="document.getElementById('detect-results-card').style.display='none'">&#10005; Close</button>
+        </div>
+      </div>
+      <div class="card-bd">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+          <div style="background:var(--bg-overlay);border:1px solid var(--border);border-radius:var(--radius);padding:11px 14px;"><div style="font-size:10px;color:var(--text-tertiary);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Flows Checked</div><div style="font-size:22px;font-weight:700;" id="dr-total">—</div></div>
+          <div style="background:var(--danger-subtle);border:1px solid var(--danger-border);border-radius:var(--radius);padding:11px 14px;"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Anomalies Found</div><div style="font-size:22px;font-weight:700;color:var(--danger);" id="dr-anomalies">—</div></div>
+          <div style="background:var(--success-subtle);border:1px solid var(--success-border);border-radius:var(--radius);padding:11px 14px;"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Normal</div><div style="font-size:22px;font-weight:700;color:var(--success);" id="dr-normal">—</div></div>
+          <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:var(--radius);padding:11px 14px;"><div style="font-size:10px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Detection Rate</div><div style="font-size:22px;font-weight:700;color:var(--accent);" id="dr-rate">—</div></div>
+          <div id="dr-zero-day-card" style="display:none;grid-column:1/-1;background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.25);border-radius:var(--radius);padding:11px 14px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:18px;">⚠</span>
+            <div>
+              <div style="font-size:10px;color:#7C3AED;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">Zero-Day Candidates</div>
+              <div style="font-size:22px;font-weight:700;color:#7C3AED;" id="dr-zero-day">0</div>
+            </div>
+            <div style="font-size:11px;color:#7C3AED;opacity:.75;margin-left:4px;">Novel threat patterns — no known attack signature matched and anomaly score ≥ 65%</div>
+          </div>
+
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+          <div><div class="fs-12 fw-500 c-secondary mb-8">Severity Breakdown</div><div id="dr-severity" style="display:flex;flex-direction:column;gap:6px;"></div></div>
+          <div><div class="fs-12 fw-500 c-secondary mb-8">Attack Categories Detected</div><div id="dr-categories" style="display:flex;flex-direction:column;gap:5px;"></div></div>
+        </div>
+        <div class="fs-12 fw-500 c-secondary mb-8">Sample Detected Anomalies <span class="fs-11 c-muted">(first 20)</span></div>
+        <div class="tbl-wrap" style="max-height:240px;overflow-y:auto;">
+          <table class="tbl" id="detect-results-tbl">
+            <thead><tr><th>Time</th><th>Src IP</th><th>Dst IP</th><th>Port</th><th>Proto</th><th>Attack Type</th><th>Severity</th><th>Confidence</th></tr></thead>
+            <tbody id="detect-results-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ ALERT LOG ══ -->
+    <div class="panel" id="panel-alerts">
+      <div class="stats-row mb-12">
+        <div class="scard"><div class="scard-top"><span class="scard-label">Critical</span><div class="scard-ico red"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M6.5 3.5v3M6.5 8.5v1"/></svg></div></div><div class="scard-val c-danger" id="alert-count-critical">—</div><div class="scard-sub">Immediate action</div><div class="scard-bar red"></div></div>
+        <div class="scard"><div class="scard-top"><span class="scard-label">High</span><div class="scard-ico amber"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6.5 1L1 12h11L6.5 1z"/><path d="M6.5 5v3M6.5 9.5v1"/></svg></div></div><div class="scard-val c-warning" id="alert-count-high">—</div><div class="scard-sub">Review soon</div><div class="scard-bar amber"></div></div>
+        <div class="scard"><div class="scard-top"><span class="scard-label">Medium</span><div class="scard-ico blue"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6.5 1L1 12h11L6.5 1z"/><path d="M6.5 5v3M6.5 9.5v1"/></svg></div></div><div class="scard-val" id="alert-count-medium">—</div><div class="scard-sub">Monitor closely</div><div class="scard-bar blue"></div></div>
+        <div class="scard"><div class="scard-top"><span class="scard-label">Low</span><div class="scard-ico green"><svg viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="5.5"/><path d="M4 6.5l2 2 3.5-3.5"/></svg></div></div><div class="scard-val c-success" id="alert-count-low">—</div><div class="scard-sub">Informational</div><div class="scard-bar green"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd">
+          <div class="card-title">All Alerts</div>
+          <div class="flex items-c gap-8">
+            <div class="seg">
+              <button class="seg-btn active" onclick="filterAlerts('all',this)">All</button>
+              <button class="seg-btn" onclick="filterAlerts('critical',this)">Critical</button>
+              <button class="seg-btn" onclick="filterAlerts('high',this)">High</button>
+            </div>
+            <button class="btn btn-default btn-sm" onclick="exportAlerts()">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.5 1v6M3 4.5l2.5 2.5 2.5-2.5M1 9.5h9"/></svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Timestamp</th><th>Attack Type</th><th>Source IP</th><th>Destination IP</th><th>Port</th><th>Protocol</th><th>Severity</th><th>Confidence</th></tr></thead>
+            <tbody id="alert-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SETTINGS ══ -->
+    <div class="panel" id="panel-settings">
+      <div class="g2">
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Detection</div></div>
+          <div class="card-bd">
+            <div class="fg mb-12">
+              <label class="flabel">Active Model</label>
+              <div class="seg">
+                <button class="seg-btn active" onclick="switchModel('nsa',this)">AIS — Negative Selection</button>
+                <button class="seg-btn" onclick="switchModel('isolation_forest',this)">Isolation Forest</button>
+              </div>
+            </div>
+            <div class="toggle-row"><div><div class="ti-label">Automated IP Blocking</div><div class="ti-sub">Auto-quarantine high-confidence threats</div></div><label class="sw"><input type="checkbox"><div class="sw-track"></div><div class="sw-thumb"></div></label></div>
+            <div class="toggle-row"><div><div class="ti-label">Live Packet Sniffing</div><div class="ti-sub">Real-time traffic capture</div></div><label class="sw"><input type="checkbox" checked><div class="sw-track"></div><div class="sw-thumb"></div></label></div>
+            <div class="toggle-row"><div><div class="ti-label">Multi-Factor Alert Scoring</div><div class="ti-sub">2-factor confirmation before alerting</div></div><label class="sw"><input type="checkbox" checked><div class="sw-track"></div><div class="sw-thumb"></div></label></div>
+            <div class="div"></div>
+            <div class="fg">
+              <label class="flabel">Alert Threshold</label>
+              <div class="seg"><button class="seg-btn">Low</button><button class="seg-btn active">Medium</button><button class="seg-btn">High</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">Data Management</div></div>
+            <div class="card-bd">
+              <div class="fg">
+                <label class="flabel">Log Retention Period</label>
+                <select class="finput"><option>7 days</option><option selected>30 days</option><option>90 days</option><option>365 days</option></select>
+              </div>
+              <div class="flex gap-8 mt-10">
+                <button class="btn btn-default btn-sm" style="flex:1" onclick="exportAlerts()"><svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.5 1v6M3 4.5l2.5 2.5 2.5-2.5M1 9.5h9"/></svg> Export Data</button>
+                <button class="btn btn-danger btn-sm" style="flex:1">Clear Logs</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">System Information</div></div>
+            <div class="card-bd">
+              <div class="ir"><span class="ir-key">Version</span><span class="ir-val accent mono">v4.0</span></div>
+              <div class="ir"><span class="ir-key">Last Updated</span><span class="ir-val mono">2025-12-22</span></div>
+              <div class="ir"><span class="ir-key">Database</span><span class="ir-val success">● Connected</span></div>
+              <div class="ir"><span class="ir-key">API Status</span><span id="settings-api-status" class="ir-val success">● Connected</span></div>
+              <div class="ir"><span class="ir-key">Algorithm</span><span class="ir-val mono">Negative Selection (NSA)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PROFILE ══ -->
+    <div class="panel" id="panel-profile">
+      <div class="g2">
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Account</div></div>
+          <div class="card-bd">
+            <div style="text-align:center;padding:6px 0 18px;">
+              <div class="av-lg">A</div>
+              <div style="font-size:16px;font-weight:700;letter-spacing:-0.3px;">Admin1</div>
+              <div class="fs-12 c-muted mt-8">Network Administrator</div>
+              <div class="fs-11 mono c-muted mt-8">Last login: Dec 23, 2025</div>
+            </div>
+            <div class="div"></div>
+            <div class="ir"><span class="ir-key">Username</span><span class="ir-val mono">admin1</span></div>
+            <div class="ir"><span class="ir-key">Email</span><span class="ir-val mono">admin1@gmail.com</span></div>
+            <div class="ir"><span class="ir-key">Role</span><span class="ir-val accent">Network Administrator</span></div>
+            <div class="ir"><span class="ir-key">Account Created</span><span class="ir-val mono">January 15, 2025</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Security</div></div>
+          <div class="card-bd">
+            <div class="fg"><label class="flabel">Current Password</label><input type="password" class="finput" placeholder="Enter current password"></div>
+            <div class="fg"><label class="flabel">New Password</label><input type="password" class="finput" placeholder="Minimum 12 characters"></div>
+            <div class="fg"><label class="flabel">Confirm New Password</label><input type="password" class="finput" placeholder="Repeat new password"></div>
+            <button class="btn btn-accent btn-full mt-10">Update Password</button>
+            <div class="div"></div>
+            <div class="toggle-row"><div><div class="ti-label">Two-Factor Authentication</div><div class="ti-sub">TOTP / Authenticator app</div></div><label class="sw"><input type="checkbox"><div class="sw-track"></div><div class="sw-thumb"></div></label></div>
+            <div style="margin-top:16px;"><button class="btn btn-danger btn-full" onclick="doLogout()">Sign Out</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /page-app -->
+
+<!-- ══════════════════════════════════════════════════
+     JS MODULES — loaded in dependency order
+══════════════════════════════════════════════════ -->
+<script src="js/api.js"></script>
+<script src="js/state.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/capture.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/training.js"></script>
+<script src="js/detection.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/init.js"></script>
+</body>
+</html>
