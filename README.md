@@ -243,6 +243,8 @@ exported from CICFlowMeter as CSV. Key properties:
   - Leading/trailing whitespace in column names → stripped
 
 **Download CIC-IDS-2017:** https://www.unb.ca/cic/datasets/ids-2017.html
+**Download CIC-IDS-2017:** https://www.kaggle.com/datasets/dhoogla/cicids2017
+**Download CIC-IDS-2017:** https://www.kaggle.com/datasets/chethuhn/network-intrusion-dataset
 
 > **IP / Port metadata:** CICFlowMeter flow-stat files do **not** include source/
 > destination IPs or ports. The dashboard displays `N/A` for these fields — this is
