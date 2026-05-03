@@ -11,11 +11,15 @@ WS   /ws/live                  — WebSocket push for real-time dashboard update
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.pipeline import models_ready
 from app.state import _state, _build_engine
+from app.core.database import get_db, SessionLocal
+from app.models.db_models import RawFlowDB, AlertDB
+import datetime
 
 router = APIRouter(tags=["capture"])
 
@@ -61,24 +65,63 @@ async def start_capture(interface: Optional[str] = None):
             return
 
         _state["packet_count"] += 1
+        _state["flows_completed"] += 1
         _state["chart_normal"].pop(0)
         _state["chart_anomaly"].pop(0)
 
+        db = SessionLocal()
+        timestamp = datetime.datetime.utcnow().isoformat()
+        proto_map = {6: "TCP", 17: "UDP", 1: "ICMP"}
+        proto_str = proto_map.get(meta.get("protocol", 0), "TCP")
+        
+        raw_flow = RawFlowDB(
+            timestamp=timestamp,
+            src_ip=str(meta.get("src_ip", "")),
+            dst_ip=str(meta.get("dst_ip", "")),
+            dst_port=int(meta.get("dst_port", 0) or 0),
+            protocol=proto_str,
+            flow_bytes_s=float(features.get("Flow Bytes/s", 0.0) or 0.0)
+        )
+        db.add(raw_flow)
+
         if result["anomalies_found"] > 0:
             _state["anomaly_count"] += 1
-            _state["alerts"].extend(result["alerts"])
             _state["chart_normal"].append(0)
             _state["chart_anomaly"].append(1)
 
-            proto_map = {6: "TCP", 17: "UDP", 1: "ICMP"}
             for alert in result["alerts"]:
                 alert["src_ip"]   = meta.get("src_ip",   alert.get("src_ip", ""))
                 alert["dst_ip"]   = meta.get("dst_ip",   alert.get("dst_ip", ""))
                 alert["dst_port"] = str(meta.get("dst_port", alert.get("dst_port", "")))
-                alert["protocol"] = proto_map.get(meta.get("protocol", 0), "TCP")
+                alert["protocol"] = proto_str
+                
+                db_alert = AlertDB(
+                    alert_id=alert["alert_id"],
+                    timestamp=alert["timestamp"],
+                    attack_type=alert["attack_type"],
+                    src_ip=alert["src_ip"],
+                    dst_ip=alert["dst_ip"],
+                    dst_port=int(alert["dst_port"] or 0),
+                    protocol=alert["protocol"],
+                    severity=alert["severity"],
+                    confidence=alert["confidence"],
+                    confidence_pct=alert["confidence_pct"],
+                    is_false_positive=False,
+                    is_zero_day=alert["is_zero_day"],
+                    raw_features=features
+                )
+                db.add(db_alert)
+            _state["alerts"].extend(result["alerts"])
         else:
             _state["chart_normal"].append(1)
             _state["chart_anomaly"].append(0)
+
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
 
         asyncio.run_coroutine_threadsafe(_broadcast_live_update(result, meta), loop)
 
@@ -151,6 +194,14 @@ async def chart_data():
     }
 
 
+@router.delete("/api/capture/flows")
+async def clear_flows(db: Session = Depends(get_db)):
+    """Clear all raw flows from the database."""
+    db.query(RawFlowDB).delete()
+    db.commit()
+    return {"message": "Raw flows cleared from persistent database"}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  WEBSOCKET — real-time push to frontend
 # ═══════════════════════════════════════════════════════════════════════
@@ -172,12 +223,13 @@ async def websocket_live(ws: WebSocket):
     await ws.send_json({
         "type": "snapshot",
         "data": {
-            "chart_normal":   _state["chart_normal"],
-            "chart_anomaly":  _state["chart_anomaly"],
-            "packet_count":   _state["packet_count"],
-            "anomaly_count":  _state["anomaly_count"],
-            "capture_active": _state["capture_active"],
-            "recent_alerts":  _state["alerts"][-10:],
+            "chart_normal":    _state["chart_normal"],
+            "chart_anomaly":   _state["chart_anomaly"],
+            "packet_count":    _state["packet_count"],
+            "anomaly_count":   _state["anomaly_count"],
+            "flows_completed": _state["flows_completed"],
+            "capture_active":  _state["capture_active"],
+            "recent_alerts":   _state["alerts"][-10:],
         },
     })
 
@@ -210,17 +262,18 @@ async def _broadcast_live_update(result: dict, meta: dict):
     message = {
         "type": "flow",
         "data": {
-            "anomalies_found": result.get("anomalies_found", 0),
-            "alerts":          result.get("alerts", []),
-            "chart_normal":    _state["chart_normal"][-1],
-            "chart_anomaly":   _state["chart_anomaly"][-1],
-            "packet_count":    _state["packet_count"],
-            "anomaly_count":   _state["anomaly_count"],
-            "src_ip":          meta.get("src_ip", ""),
-            "dst_ip":          meta.get("dst_ip", ""),
-            "dst_port":        str(meta.get("dst_port", "")),
-            "protocol":        meta.get("protocol", 0),
-            "flow_bytes_s":    result.get("flow_bytes_s", 0),
+            "anomalies_found":  result.get("anomalies_found", 0),
+            "alerts":           result.get("alerts", []),
+            "chart_normal":     _state["chart_normal"][-1],
+            "chart_anomaly":    _state["chart_anomaly"][-1],
+            "packet_count":     _state["packet_count"],
+            "anomaly_count":    _state["anomaly_count"],
+            "flows_completed":  _state["flows_completed"],
+            "src_ip":           meta.get("src_ip", ""),
+            "dst_ip":           meta.get("dst_ip", ""),
+            "dst_port":         str(meta.get("dst_port", "")),
+            "protocol":         meta.get("protocol", 0),
+            "flow_bytes_s":     result.get("flow_bytes_s", 0),
         },
     }
 

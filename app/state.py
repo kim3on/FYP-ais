@@ -31,16 +31,11 @@ _state: dict = {
     "chart_normal":   [0] * 60,
     "chart_anomaly":  [0] * 60,
     "chart_ts":       [],
+    "flows_completed": 0,
     # Batch detection
     "detect_status":       "idle",  # idle | running | done | error
     "detect_logs":         [],
     "last_detect_result":  None,
-}
-
-# ── Simple users (replace with DB in production) ─────────────────────────
-_USERS: dict = {
-    "admin":   {"password": "password",  "role": "Network Administrator"},
-    "analyst": {"password": "analyst123", "role": "Security Analyst"},
 }
 
 
