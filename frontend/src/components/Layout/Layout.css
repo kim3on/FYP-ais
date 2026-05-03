@@ -1,0 +1,78 @@
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  min-height: 100vh;
+  background: var(--bg-base);
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Top right status bar */
+.top-status-bar {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 10;
+}
+.top-status-bar .status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.top-status-bar .status-text {
+  letter-spacing: 0.05em;
+}
+
+/* Page wrapper used inside every page component */
+.page {
+  padding: 24px;
+  animation: fadeIn 0.18s ease;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.page-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Stat grid */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+/* Two-column layout */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr; }
+}

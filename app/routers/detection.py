@@ -48,7 +48,7 @@ async def detect(
     _limit = int(limit) if limit else None
 
     def dlog(msg: str):
-        ts = datetime.utcnow().strftime("%H:%M:%S")
+        ts = datetime.now().strftime("%H:%M:%S")
         _state["detect_logs"].append(f"[{ts}] {msg}")
 
     def run_detection():
@@ -71,6 +71,36 @@ async def detect(
             _state["anomaly_count"] += result["anomalies_found"]
             _state["last_detect_result"] = result
             _state["detect_status"] = "done"
+
+            if result["alerts"]:
+                from app.core.database import SessionLocal
+                from app.models.db_models import AlertDB
+                db = SessionLocal()
+                try:
+                    db_alerts = []
+                    for a in result["alerts"]:
+                        db_alerts.append(AlertDB(
+                            alert_id=a["alert_id"],
+                            timestamp=a["timestamp"],
+                            attack_type=a["attack_type"],
+                            src_ip=a.get("src_ip", "N/A"),
+                            dst_ip=a.get("dst_ip", "N/A"),
+                            dst_port=int(a.get("dst_port", 0) or 0),
+                            protocol=a.get("protocol", "N/A"),
+                            severity=a["severity"],
+                            confidence=a["confidence"],
+                            confidence_pct=a["confidence_pct"],
+                            is_false_positive=False,
+                            is_zero_day=a["is_zero_day"],
+                            raw_features=a.get("raw_features", {})
+                        ))
+                    db.add_all(db_alerts)
+                    db.commit()
+                except Exception as e:
+                    dlog(f"[ERROR] DB Save failed: {e}")
+                    db.rollback()
+                finally:
+                    db.close()
 
             dlog(f"[OK] Checked {result['total_checked']:,} flows.")
             dlog(

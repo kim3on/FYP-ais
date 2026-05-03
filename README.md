@@ -4,63 +4,37 @@
 
 ---
 
+## 🚀 Recent System Updates (May 2026)
+
+- **Frontend UI/UX Overhaul:** Transitioned to a high-contrast "Cyber-Defense" aesthetic using a refined Rosé Pine theme. Enhanced forensic data visualization and real-time status tracking.
+- **Robust AIS Matching:** Refactored the Negative Selection Algorithm (NSA) to use a True V-Detector architecture. Detects known anomalies via variable-radius mature detectors, while using the "Self-gap" fallback mechanism for far-out zero-day spaces.
+- **Leakage-Free ML Pipeline:** Refactored the preprocessing and training workflow to eliminate data leakage. The feature scaler is now fitted strictly on training data, ensuring statistically sound benchmarks against Isolation Forest.
+- **Code Integrity:** Resolved 49 frontend linting issues and optimized React hook stability.
+
 ## Architecture Overview
 
 ```
 ais-backend/
 │
 ├── app/
-│   ├── main.py                    ← Thin FastAPI app factory (registers routers)
-│   ├── state.py                   ← Shared in-memory state + _build_engine()
-│   ├── schemas.py                 ← Pydantic request/response models
-│   │
-│   ├── routers/                   ← One file per feature area (all < 600 lines)
-│   │   ├── auth.py                ← POST /api/auth/login
-│   │   ├── training.py            ← POST /api/train, GET /api/train/logs|result
-│   │   ├── detection.py           ← POST /api/detect, GET /api/detect/logs|result
-│   │   ├── alerts.py              ← GET/PATCH /api/alerts/*
-│   │   ├── capture.py             ← POST/GET /api/capture/*, WS /ws/live
-│   │   └── dashboard.py           ← Stats, model info, settings, health, landing page
-│   │
-│   ├── models/
-│   │   ├── nsa.py                 ← Negative Selection Algorithm (core AIS)
-│   │   └── isolation_forest.py    ← Isolation Forest baseline model
-│   │
+│   ├── main.py          # FastAPI Application Factory
 │   ├── core/
-│   │   ├── preprocessor.py        ← CIC-IDS-2017 data loading, encoding, scaling
-│   │   ├── pipeline.py            ← Full training pipeline (Train → Evaluate → Save)
-│   │   ├── detection.py           ← Live/batch detection engine + alert generation
-│   │   ├── capture.py             ← Live packet capture (scapy + FlowAggregator)
-│   │   └── evaluator.py           ← Metrics: accuracy, precision, recall, F1, FPR
-│   │
-│   └── js/                        ← Frontend (served as static files)
-│       ├── ais-detect.css         ← Design system — tokens, components, utilities
-│       ├── api.js                 ← Fetch wrapper (GET / POST / PATCH / postForm)
-│       ├── state.js               ← Shared app state + DOM helpers
-│       ├── theme.js               ← Theme toggle, toast, connection indicator, clock
-│       ├── auth.js                ← Login / logout
-│       ├── nav.js                 ← Panel routing + resize
-│       ├── charts.js              ← Canvas traffic chart + AIS scatter plot
-│       ├── dashboard.js           ← Stats fetching + alert table renders
-│       ├── training.js            ← Upload, log polling, result display
-│       ├── detection.js           ← Batch detect, result render, CSV export
-│       ├── capture.js             ← WebSocket, live flows table, capture controls
-│       ├── settings.js            ← Model switch + profile render
-│       └── init.js                ← App init + startup health check
+│   │   ├── detection.py # Live Inference Engine
+│   │   ├── pipeline.py  # Leakage-free Training Pipeline
+│   │   └── preprocessor.py # CIC-IDS-2017 Feature Processor
+│   ├── models/
+│   │   ├── nsa.py       # True V-Detector Negative Selection Model
+│   │   └── isolation_forest.py # Benchmark Baseline
+│   └── artefacts/       # Trained Models & Preprocessor States
 │
-├── artefacts/                     ← Saved models (auto-created after training)
-│   ├── nsa_model.pkl
-│   ├── iso_model.pkl
-│   ├── preprocessor.pkl
-│   └── last_train_result.json
+├── frontend/            # React (Vite) Dashboard
+│   ├── src/hooks/       # Optimized Custom Hooks (useApp, useAuth)
+│   └── src/styles/      # Modern Cyber-Defense Global Styles
 │
-├── test_backend.py                ← 26-test suite (no FastAPI/network needed)
-├── requirements.txt
-└── README.md
+└── validate and test/   # Test Suites & Auditors
+    ├── test_backend.py  # Comprehensive Test Suite (28 tests)
+    └── validate_ml.py   # ML Statistical Integrity Auditor
 ```
-
-**File-size constraint:** Every source file is kept under **600 lines** to maintain
-readability. The router/JS split enforces single-responsibility across the codebase.
 
 ---
 
@@ -81,79 +55,50 @@ The human immune system distinguishes **Self** (your own cells) from **Non-Self*
 | Mature antibody     | Stored detector            |
 | Immune response     | Anomaly alert              |
 
-### Negative Selection Algorithm (NSA) Steps
-
-```
-1. TRAINING PHASE
-   ┌─────────────────────────────────────────┐
-   │  Input: Clean (normal) network traffic   │
-   │                                          │
-   │  ① Normalise features to [0, 1]ⁿ        │
-   │  ② Define Self = all normal samples      │
-   │  ③ Generate random candidate detector d  │
-   │  ④ If dist(d, Self) < r → REJECT (would  │
-   │     misfire on normal traffic)           │
-   │  ⑤ Else → KEEP as mature antibody        │
-   │  ⑥ Repeat until max_detectors stored     │
-   └─────────────────────────────────────────┘
-
-2. DETECTION PHASE
-   ┌─────────────────────────────────────────┐
-   │  Input: Live/uploaded network traffic   │
-   │                                         │
-   │  For each flow x:                       │
-   │    If dist(x, any_detector) < r         │
-   │      → ANOMALY (Non-Self detected)      │
-   │    Else                                 │
-   │      → NORMAL                           │
-   └─────────────────────────────────────────┘
-```
-
-**Distance metric:** Normalised Euclidean distance across all ~75 CIC-IDS-2017 features.
-
-**Confidence score:** `1 - (min_dist_to_detector / (r × 3))`, clamped to [0, 1].
+### True V-Detector Negative Selection Algorithm
+The current implementation uses a **V-Detector Inference Engine**:
+1. **Adaptive Immune Response (Primary):** Network flows are checked against the mature V-Detector repertoire. Any flow falling within a detector's variable radius (`r = dist_to_nearest_self - r_s`) is immediately flagged as an anomaly.
+2. **Innate Immune Fallback (Zero-Day):** Due to the curse of dimensionality, detectors cannot cover the entire 77-dimensional space. Any flow falling far outside the learned "Self" manifold (exceeding self-gap threshold `r`) is flagged as a zero-day anomaly.
+3. **Boundary Mutation & Aging:** Antibody generation uses K-Means centroids and Gaussian mutation near the Self-boundary to minimize evasion "holes", while an active-aging mechanism (`refresh()`) simulates T-Cell death and replacement.
 
 ---
 
-## Quick Start
+## 🚀 Getting Started
 
-### 1. Create a virtual environment and install dependencies
-```bash
-python -m venv .venv
+1. **Environment:**
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-# Windows
-.venv\Scripts\activate
+2. **Run Tests:**
+   ```powershell
+   cd "validate and test"
+   python test_backend.py  # Backend & Model Tests
+   python validate_ml.py   # ML Integrity Audit
+   ```
 
-# macOS / Linux
-source .venv/bin/activate
+3. **Frontend Build:**
+   ```powershell
+   cd frontend
+   npm install
+   npm run build
+   ```
 
-pip install -r requirements.txt
-```
-
-### 2. Run the API server
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-- **Interactive API docs:** http://localhost:8000/docs
-- **Landing page:** http://localhost:8000/
-- **Health check:** http://localhost:8000/health
-
-### 3. Open the dashboard
-Open `app/ais-detect-live.html` directly in a browser. No build step required —
-it loads the JS modules from `app/js/` via `<script src="js/...">` tags.
-
-> Make sure the backend is running on `http://localhost:8000` before logging in.
-
-### 4. Run the test suite (no server required)
-```bash
-python test_backend.py
-```
-
-The suite generates synthetic CIC-IDS-2017 data internally — no dataset download needed.
+4. **Launch Server:**
+   ```powershell
+   python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
 
 ---
 
+## 📋 Technical Documentation
+Detailed technical analyses are available in the project root:
+- `analysis_ui_ux.md`: Design philosophy and frontend audit.
+- `analysis_ais_logic.md`: Immunological matching and forensic scoring details.
+- `analysis_ml_validation.md`: Statistical integrity and leakage prevention report.
+- `analysis_security_audit.md`: **[CRITICAL]** Brutally critical system security audit.
 ## API Reference
 
 ### Authentication
@@ -263,30 +208,20 @@ exported from CICFlowMeter as CSV. Key properties:
 
 ---
 
-## Frontend Connection
+## 🔒 Security Status
 
-The dashboard (`app/ais-detect-live.html`) connects to the backend at:
+**WARNING:** A comprehensive security audit (May 2026) has identified several **CRITICAL** vulnerabilities in the authentication and WebSocket layers. While the detection engine is robust, the application itself is currently considered a "Security Theatre" implementation and **must not be deployed in production** without implementing the recommendations in `analysis_security_audit.md`.
 
-```javascript
-// app/js/api.js — change if your server runs on a different host/port
-const API = 'http://localhost:8000';
-```
-
-All endpoints return JSON with CORS enabled for all origins. The frontend uses:
-- **REST polling** (`/api/train/logs`, `/api/detect/logs`) for training/detection progress
-- **WebSocket** (`/ws/live`) for real-time live capture updates
+**Identified Issues:**
+- Predictable demo tokens.
+- Unauthenticated WebSockets.
+- Cleartext password comparison.
+- Static radius evasion vectors.
 
 ---
 
-## Notes on Real-World Performance
-
-- The NSA works best when trained on **clean normal traffic only**.
-  If the training set contains hidden attacks, the Self profile is poisoned.
-- The Pre-Training Validation panel (Training page) shows dataset stats before
-  training starts — use this to confirm the BENIGN/attack split is as expected.
-- Use the **Isolation Forest** baseline when you cannot guarantee a clean training set
-  (it tolerates mixed contamination via the `contamination` parameter).
-- **Live packet capture** requires root/admin privileges and `scapy` installed.
-  On Windows, install [Npcap](https://npcap.com/) first.
-- For production: replace the in-memory alert store with SQLite/PostgreSQL,
-  add proper JWT auth, and scope CORS origins.
+## Database Persistence
+The system uses a persistent local **SQLite database** (`app/artefacts/ais_detect.db`) managed via **SQLAlchemy ORM**.
+- **`alerts`**: Stores every anomaly flagged by the engine.
+- **`blocked_ips`**: Persistent registry for inbound Windows Firewall block rules.
+- **`raw_flows`**: Archives live packet flows captured by the sniffer.

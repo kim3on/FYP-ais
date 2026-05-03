@@ -12,7 +12,6 @@ Requirements
 Needs root / admin privileges to open a raw socket:
     Linux:  sudo python ...  OR  sudo setcap cap_net_raw+ep $(which python3)
     Windows: run as Administrator
-    macOS:  sudo python ...
 
 How it works
 ------------
