@@ -99,6 +99,112 @@ Detailed technical analyses are available in the project root:
 - `analysis_ais_logic.md`: Immunological matching and forensic scoring details.
 - `analysis_ml_validation.md`: Statistical integrity and leakage prevention report.
 - `analysis_security_audit.md`: **[CRITICAL]** Brutally critical system security audit.
+## API Reference
+
+### Authentication
+```
+POST /api/auth/login
+Body: { "username": "admin", "password": "password" }
+```
+
+Default accounts: `admin / password` · `analyst / analyst123`
+
+### Training
+```
+POST /api/train
+  Form field : file  (CSV or Parquet — CIC-IDS-2017 format)
+  Query params: r, max_detectors, max_attempts, contamination, test_size
+
+GET  /api/train/logs     → real-time training log lines + status
+GET  /api/train/result   → full evaluation results + model metadata
+```
+
+### Detection
+```
+POST /api/detect
+  Form field: file  (CSV or Parquet network log)
+  Returns: { total_checked, anomalies_found, alerts, severity_counts, ... }
+
+GET  /api/detect/logs    → streaming detection log + status
+GET  /api/detect/result  → last completed detection result
+
+POST /api/detect/sample
+  Body: { feature dict for one network flow }
+```
+
+### Live Packet Capture
+```
+POST /api/capture/start   → start scapy sniffer (requires root/admin)
+POST /api/capture/stop    → stop capture
+GET  /api/capture/status  → live counters
+GET  /api/capture/interfaces → available network interfaces
+GET  /api/capture/chartdata  → 60-point ring buffer for polling fallback
+
+WS   /ws/live             → WebSocket push (snapshot + per-flow updates)
+```
+
+### Alerts
+```
+GET   /api/alerts              → list alerts (?severity=critical, ?limit=100)
+GET   /api/alerts/{id}         → single alert detail
+PATCH /api/alerts/{id}/fp      → mark as false positive
+```
+
+### Dashboard & Settings
+```
+GET  /api/dashboard/stats      → stat card numbers for the frontend
+GET  /api/model/summary        → NSA + IsoForest metadata
+GET  /api/system/status        → active status, packet count, antibody count
+PATCH /api/settings            → switch active model (nsa | isolation_forest)
+GET  /health                   → { status: "ok", version: "4.0.0" }
+```
+
+---
+
+## Configuration Parameters
+
+| Parameter        | Default | Description |
+|------------------|---------|-------------|
+| `r`              | 0.5     | Detector activation radius. Smaller = more precise, fewer FPs. |
+| `max_detectors`  | 500     | Max mature antibodies. More = better coverage, slower training. |
+| `max_attempts`   | 10,000  | Max random candidates tried during training. |
+| `contamination`  | 0.05    | IsoForest: expected fraction of attacks in training data. |
+| `test_size`      | 0.2     | Fraction held out for test-set evaluation. |
+
+---
+
+## Dataset Format (CIC-IDS-2017)
+
+The system is trained on **CIC-IDS-2017** (Canadian Institute for Cybersecurity),
+exported from CICFlowMeter as CSV. Key properties:
+
+- **~80 numerical flow-stat features** (packet lengths, IAT, flags, ratios, …)
+- **Label column:** `" Label"` (note leading space from CICFlowMeter)
+- **Normal label:** `"BENIGN"` — all other labels are treated as attacks
+- **Common attack labels:** DoS Hulk, DDoS, PortScan, Bot, Infiltration, …
+- **Known quirks handled automatically:**
+  - `Inf` strings in `Flow Bytes/s` / `Flow Packets/s` → replaced with `0`
+  - Duplicate `Fwd Header Length.1` column → dropped
+  - Leading/trailing whitespace in column names → stripped
+
+**Download CIC-IDS-2017:** https://www.unb.ca/cic/datasets/ids-2017.html
+**Download CIC-IDS-2017:** https://www.kaggle.com/datasets/dhoogla/cicids2017
+**Download CIC-IDS-2017:** https://www.kaggle.com/datasets/chethuhn/network-intrusion-dataset
+
+> **IP / Port metadata:** CICFlowMeter flow-stat files do **not** include source/
+> destination IPs or ports. The dashboard displays `N/A` for these fields — this is
+> correct behaviour, not a bug. Use raw PCAP exports if you need endpoint metadata.
+
+---
+
+## Alert Severity Mapping
+
+| Confidence Score | Severity |
+|-----------------|----------|
+| ≥ 90%           | Critical |
+| ≥ 75%           | High     |
+| ≥ 50%           | Medium   |
+| < 50%           | Low      |
 
 ---
 
