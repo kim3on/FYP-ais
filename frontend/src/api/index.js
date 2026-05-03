@@ -36,6 +36,9 @@ export async function getAlerts(limit = 200) {
 export async function markFalsePositive(alertId) {
   return apiFetch(`/api/alerts/${alertId}/fp`, { method: 'PATCH' });
 }
+export async function clearAlerts() {
+  return apiFetch('/api/alerts', { method: 'DELETE' });
+}
 
 // ── Training ──────────────────────────────────────────────────
 export async function startTraining(file, params = {}) {

@@ -58,3 +58,11 @@ async def mark_false_positive(alert_id: str, db: Session = Depends(get_db)):
     alert.is_false_positive = True
     db.commit()
     return {"success": True, "alert_id": alert_id}
+
+
+@router.delete("")
+async def clear_all_alerts(db: Session = Depends(get_db)):
+    """Delete all alerts from the database."""
+    deleted_count = db.query(AlertDB).delete()
+    db.commit()
+    return {"success": True, "deleted_count": deleted_count}

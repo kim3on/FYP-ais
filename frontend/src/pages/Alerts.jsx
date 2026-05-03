@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
-import { getAlerts, markFalsePositive, blockIP, unblockIP, getBlockedIPs } from '../api';
+import { getAlerts, markFalsePositive, blockIP, unblockIP, getBlockedIPs, clearAlerts } from '../api';
 import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
@@ -90,6 +90,17 @@ export default function Alerts() {
     high:    alerts.filter(a=>(a.severity||'').toLowerCase()==='high').length,
     zeroDay: alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length,
   };
+
+  async function handleClearAlerts() {
+    if (!window.confirm("Are you sure you want to clear all alerts? This action cannot be undone.")) return;
+    try {
+      await clearAlerts();
+      setAlerts([]);
+    } catch(err) {
+      console.error("Failed to clear alerts:", err);
+      alert(err.message || 'Failed to clear alerts');
+    }
+  }
 
   function exportAlertsCSV() {
     if (filtered.length === 0) return;
@@ -202,9 +213,14 @@ export default function Alerts() {
                 </button>
               ))}
             </div>
-            <button className="btn btn-primary" style={{fontSize:'11px',padding:'5px 12px'}} onClick={exportAlertsCSV} disabled={filtered.length===0}>
-              ↓ Export CSV
-            </button>
+            <div style={{display:'flex', gap:'8px'}}>
+              <button className="btn btn-ghost" style={{fontSize:'11px',padding:'5px 12px'}} onClick={handleClearAlerts} disabled={filtered.length===0}>
+                Clear
+              </button>
+              <button className="btn btn-primary" style={{fontSize:'11px',padding:'5px 12px'}} onClick={exportAlertsCSV} disabled={filtered.length===0}>
+                ↓ Export CSV
+              </button>
+            </div>
           </div>
 
           <div className="card">

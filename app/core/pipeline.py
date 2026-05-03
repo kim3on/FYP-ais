@@ -86,7 +86,10 @@ class TrainingPipeline:
         def log(msg: str):
             ts = datetime.now().strftime("%H:%M:%S")
             full = f"[{ts}] {msg}"
-            print(full)
+            # Use sys.stdout with replace errors to avoid cp1252 crashes on Windows
+            import sys
+            sys.stdout.buffer.write((full + "\n").encode("utf-8", errors="replace"))
+            sys.stdout.flush()
             if log_callback:
                 log_callback(full)
 
@@ -143,7 +146,7 @@ class TrainingPipeline:
         nsa.fit(X_train_normal)
 
         log(f"[OK] {nsa.meta_['mature_detectors']:,} V-detectors generated "
-            f"(radius range: {nsa.meta_['det_radius_min']:.3f}–{nsa.meta_['det_radius_max']:.3f}).")
+            f"(radius range: {nsa.meta_['det_radius_min']:.3f}-{nsa.meta_['det_radius_max']:.3f}).")
 
         # ── 5. TRAIN ISOLATION FOREST ──────────────────────────────────
         log("[INFO] Training Isolation Forest baseline...")
@@ -177,7 +180,7 @@ class TrainingPipeline:
         # ── 7. COMPILE RESULT ──────────────────────────────────────────
         duration = (datetime.now() - t0).total_seconds()
         log(f"[METRICS] Total pipeline duration: {duration:.2f} seconds")
-        log("[SYSTEM] Status: LEARNING → ACTIVE")
+        log("[SYSTEM] Status: LEARNING -> ACTIVE")
 
         result = {
             "nsa_summary":      nsa.summary(),
