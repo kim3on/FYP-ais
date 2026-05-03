@@ -36,6 +36,10 @@ cicids2017/
 # Exception: keep any sample/test CSVs you explicitly want tracked
 # !app/tests/sample.csv
 
+# Database and training results
+*.db
+app/artefacts/*.json
+
 # ── Logs & temp ───────────────────────────────────────────────────────────
 *.log
 *.tmp
