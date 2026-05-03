@@ -23,8 +23,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# Add project root to sys.path so 'app' can be imported
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 PASS = "\u2713"; FAIL = "\u2717"
 results = []
@@ -280,48 +279,41 @@ def test_nsa_on_cicids_features():
     csv = _make_cicids_csv(100, 30)
     prep = CICIDSPreprocessor()
     X_normal, y, df = prep.fit_transform(csv)
-    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=50,
+    nsa = NegativeSelectionDetector(r=0.4, max_detectors=50,
                                     max_attempts=1000, random_state=1)
     nsa.fit(X_normal)
     assert nsa.is_fitted_
     assert nsa.n_features_ == X_normal.shape[1]
     assert len(nsa.detectors_) > 0
-    # V-Detector: each detector should have a variable radius
-    assert nsa.det_radii_ is not None
-    assert len(nsa.det_radii_) == len(nsa.detectors_)
-    assert all(r > 0 for r in nsa.det_radii_), "All V-detector radii must be positive"
 
 def test_nsa_predict_shape():
     csv = _make_cicids_csv(80, 20)
     prep = CICIDSPreprocessor()
     X_normal, _, _ = prep.fit_transform(csv)
     X_all, _ = prep.transform(_make_cicids_csv(20, 10))
-    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=50, max_attempts=1000)
+    nsa = NegativeSelectionDetector(r=0.4, max_detectors=50, max_attempts=1000)
     nsa.fit(X_normal)
     labels, scores = nsa.predict_with_scores(X_all)
     assert len(labels) == 30
     assert all(0.0 <= s <= 1.0 for s in scores)
 
 def test_nsa_detectors_dont_match_self():
-    """Core NSA property: no V-detector sphere should overlap with any self sample."""
+    """Core NSA property: no detector should be within r of any self sample."""
     csv = _make_cicids_csv(60, 0)
     prep = CICIDSPreprocessor()
     X_normal, _, _ = prep.fit_transform(csv)
-    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=40,
+    nsa = NegativeSelectionDetector(r=0.3, max_detectors=40,
                                     max_attempts=1000, random_state=9)
     nsa.fit(X_normal)
-    n_features = X_normal.shape[1]
-    scale = np.sqrt(n_features)
-    # Every detector's variable-radius sphere must NOT contain any self sample
-    for i, det in enumerate(nsa.detectors_):
-        dists = np.sqrt(((X_normal - det) ** 2).sum(axis=1)) / scale
-        det_r = nsa.det_radii_[i]
-        assert dists.min() >= det_r - 1e-6, \
-            f"V-Detector {i} overlaps self: min_dist={dists.min():.4f} < radius={det_r:.4f}"
+    # Every detector must be OUTSIDE the self space
+    for det in nsa.detectors_:
+        dists = np.sqrt(((X_normal - det) ** 2).sum(axis=1))
+        assert dists.min() >= nsa.r - 1e-9, \
+            f"Detector too close to self: min_dist={dists.min():.4f} < r={nsa.r}"
 
-test("NSA — V-Detector fits on CIC-IDS-2017 with variable radii",  test_nsa_on_cicids_features)
-test("NSA — predict_with_scores shape and bounds",                  test_nsa_predict_shape)
-test("NSA — no V-detector sphere overlaps with self (core property)", test_nsa_detectors_dont_match_self)
+test("NSA — fits on CIC-IDS-2017 feature space",            test_nsa_on_cicids_features)
+test("NSA — predict_with_scores shape and bounds",          test_nsa_predict_shape)
+test("NSA — no detector overlaps with self (core property)", test_nsa_detectors_dont_match_self)
 
 
 # ════════════════════════════════════════════════════════════
@@ -380,7 +372,7 @@ from app.core.pipeline import TrainingPipeline
 def test_pipeline_cicids():
     csv = _make_cicids_csv(n_benign=120, n_attack=40)
     pipeline = TrainingPipeline(
-        r=0.3, r_s=0.02, max_detectors=60, max_attempts=1500,
+        r=0.4, max_detectors=60, max_attempts=1500,
         contamination=0.1, test_size=0.25, random_state=42,
     )
     result = pipeline.run(csv)
@@ -396,10 +388,8 @@ def test_pipeline_cicids():
 
     n_feat = result['validation_stats']['n_features']
     n_ab   = result['nsa_summary']['mature_detectors']
-    r_min  = result['nsa_summary'].get('det_radius_min', 0)
-    r_max  = result['nsa_summary'].get('det_radius_max', 0)
-    print(f"\n    Features    : {n_feat}")
-    print(f"    V-Detectors : {n_ab}  (radius: {r_min:.3f}–{r_max:.3f})")
+    print(f"\n    Features   : {n_feat}")
+    print(f"    Antibodies : {n_ab}")
     print(f"    NSA  — acc={result['nsa_eval']['accuracy']:.3f}  "
           f"recall={result['nsa_eval']['recall']:.3f}  "
           f"f1={result['nsa_eval']['f1']:.4f}")
@@ -430,7 +420,7 @@ from app.core.pipeline import load_nsa, load_preprocessor
 def test_detection_result_structure():
     """Detection should return correct keys and alert structure."""
     csv = _make_cicids_csv(n_benign=100, n_attack=30)
-    pipeline = TrainingPipeline(r=0.3, r_s=0.02, max_detectors=60,
+    pipeline = TrainingPipeline(r=0.4, max_detectors=60,
                                 max_attempts=1500, random_state=7)
     pipeline.run(csv)
 
@@ -500,8 +490,8 @@ _X_NORMAL = _NSA_RNG.uniform(0.30, 0.60, (200, _NSA_N_FEATURES)).astype(np.float
 _X_ATTACK = _NSA_RNG.uniform(0.80, 1.00, (200, _NSA_N_FEATURES)).astype(np.float32)
 
 def _build_nsa_fixture():
-    """Fit a V-Detector NSA on _X_SELF and return it."""
-    nsa = NegativeSelectionDetector(r=0.20, r_s=0.02, max_detectors=1000, max_attempts=20_000)
+    """Fit an NSA on _X_SELF and return it."""
+    nsa = NegativeSelectionDetector(r=0.20, max_detectors=300, max_attempts=5000)
     nsa.fit(_X_SELF)
     return nsa
 
@@ -558,42 +548,10 @@ def test_nsa_f1_on_synthetic():
     assert prec >= 0.95, f"Precision too low: {prec:.3f}"
     print(f"\n    F1={f1:.3f}  Recall={rec:.3f}  Prec={prec:.3f}")
 
-def test_nsa_vdetector_radii():
-    """V-Detector radii should vary and scale with distance from self."""
-    nsa = _build_nsa_fixture()
-    radii = nsa.det_radii_
-    assert len(radii) > 0, "No detectors generated"
-    # Radii should NOT all be identical (that would mean fixed-radius, not V-detector)
-    assert radii.std() > 0.01, \
-        f"V-Detector radii have near-zero variance ({radii.std():.4f}) — not truly variable"
-    print(f"\n    Radius range: [{radii.min():.4f}, {radii.max():.4f}]  std={radii.std():.4f}")
-
-def test_nsa_detector_primary_classification():
-    """V-detectors must catch attacks directly (proven in low-D where coverage is feasible)."""
-    # Use 10D to demonstrate V-detector primary detection.  In 77D, the curse
-    # of dimensionality makes detector coverage of the full non-self space
-    # infeasible — that's why the self-gap fallback exists.  But in manageable
-    # dimensions, V-detectors MUST function as the primary mechanism.
-    n_feat = 10
-    rng = np.random.default_rng(42)
-    X_self_10d = rng.uniform(0.3, 0.6, (500, n_feat)).astype(np.float32)
-    X_atk_10d  = rng.uniform(0.65, 0.80, (200, n_feat)).astype(np.float32)
-
-    nsa_10d = NegativeSelectionDetector(r=0.15, r_s=0.02, max_detectors=500, max_attempts=5000)
-    nsa_10d.fit(X_self_10d)
-
-    det_matched, _ = nsa_10d._check_detector_match(X_atk_10d)
-    det_catch_rate = det_matched.sum() / len(X_atk_10d)
-    print(f"\n    10D V-Detector primary catch: {det_catch_rate:.1%} of attacks")
-    assert det_catch_rate > 0.3, \
-        f"V-Detectors only caught {det_catch_rate:.1%} in 10D — mechanism not working"
-
-test("NSA geometry — zero false positives on self region",            test_nsa_zero_false_positives)
-test("NSA geometry — ≥95% true positive rate on attack region",       test_nsa_high_true_positive_rate)
-test("NSA geometry — distance separation correct (in/out sphere)",    test_nsa_distance_geometry)
-test("NSA geometry — F1/recall/precision ≥ 0.95 on synthetic data",   test_nsa_f1_on_synthetic)
-test("NSA V-Detector — radii are genuinely variable",                  test_nsa_vdetector_radii)
-test("NSA V-Detector — detectors catch attacks (primary mechanism)",   test_nsa_detector_primary_classification)
+test("NSA geometry — zero false positives on self region",         test_nsa_zero_false_positives)
+test("NSA geometry — ≥95% true positive rate on attack region",    test_nsa_high_true_positive_rate)
+test("NSA geometry — distance separation correct (in/out sphere)", test_nsa_distance_geometry)
+test("NSA geometry — F1/recall/precision ≥ 0.95 on synthetic data", test_nsa_f1_on_synthetic)
 
 
 # ════════════════════════════════════════════════════════════

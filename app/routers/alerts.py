@@ -6,12 +6,10 @@ GET   /api/alerts/{id}         — single alert detail
 PATCH /api/alerts/{id}/fp      — mark alert as false positive
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException
 from typing import Optional
 
-from app.core.database import get_db
-from app.models.db_models import AlertDB
+from app.state import _state
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -21,40 +19,35 @@ async def list_alerts(
     severity: Optional[str] = None,
     limit:    int = 100,
     offset:   int = 0,
-    db: Session = Depends(get_db)
 ):
     """List stored alerts with optional severity filter."""
-    query = db.query(AlertDB)
+    alerts = _state["alerts"]
     if severity:
-        query = query.filter(AlertDB.severity == severity)
-    
-    total = query.count()
-    alerts = query.order_by(AlertDB.id.desc()).offset(offset).limit(limit).all()
-    
+        alerts = [a for a in alerts if a.get("severity") == severity]
+    total = len(alerts)
+    page  = alerts[offset: offset + limit]
     return {
         "total":   total,
         "limit":   limit,
         "offset":  offset,
-        "alerts":  alerts,
+        "alerts":  page,
     }
 
 
 @router.get("/{alert_id}")
-async def get_alert(alert_id: str, db: Session = Depends(get_db)):
+async def get_alert(alert_id: str):
     """Return a single alert by ID."""
-    alert = db.query(AlertDB).filter(AlertDB.alert_id == alert_id).first()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    return alert
+    for a in _state["alerts"]:
+        if a.get("alert_id") == alert_id:
+            return a
+    raise HTTPException(status_code=404, detail="Alert not found")
 
 
 @router.patch("/{alert_id}/fp")
-async def mark_false_positive(alert_id: str, db: Session = Depends(get_db)):
+async def mark_false_positive(alert_id: str):
     """Mark an alert as a false positive (analyst review)."""
-    alert = db.query(AlertDB).filter(AlertDB.alert_id == alert_id).first()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    
-    alert.is_false_positive = True
-    db.commit()
-    return {"success": True, "alert_id": alert_id}
+    for a in _state["alerts"]:
+        if a.get("alert_id") == alert_id:
+            a["is_false_positive"] = True
+            return {"success": True, "alert_id": alert_id}
+    raise HTTPException(status_code=404, detail="Alert not found")

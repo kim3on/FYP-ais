@@ -23,8 +23,7 @@ router = APIRouter(prefix="/api/train", tags=["training"])
 async def train(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    r:              float = 0.3,
-    r_s:            float | None = None,
+    r:              float = 0.5,
     max_detectors:  int   = 500,
     max_attempts:   int   = 10_000,
     contamination:  float = 0.05,
@@ -35,12 +34,11 @@ async def train(
     Training runs in the background; poll /api/train/logs for progress.
 
     Config params (query string or form fields):
-      r              — Self-gap detection threshold  (default 0.3)
-      r_s            — V-Detector self-tolerance     (default: auto from r)
-      max_detectors  — max mature V-detectors        (default 500)
-      max_attempts   — max candidate gen attempts    (default 10 000)
-      contamination  — IsoForest contamination       (default 0.05)
-      test_size      — train/test split fraction     (default 0.2)
+      r              — NSA detector radius          (default 0.5)
+      max_detectors  — max mature antibodies        (default 500)
+      max_attempts   — max candidate gen attempts   (default 10 000)
+      contamination  — IsoForest contamination      (default 0.05)
+      test_size      — train/test split fraction    (default 0.2)
     """
     if _state["status"] == "learning":
         raise HTTPException(status_code=409, detail="Training already in progress")
@@ -59,7 +57,6 @@ async def train(
 
     # Capture config values into closure
     _r             = float(r)
-    _r_s           = float(r_s) if r_s is not None else None
     _max_detectors = int(max_detectors)
     _max_attempts  = int(max_attempts)
     _contamination = float(contamination)
@@ -69,7 +66,6 @@ async def train(
         try:
             pipeline = TrainingPipeline(
                 r=_r,
-                r_s=_r_s,
                 max_detectors=_max_detectors,
                 max_attempts=_max_attempts,
                 contamination=_contamination,
@@ -89,7 +85,6 @@ async def train(
         "status":  "learning",
         "config": {
             "r":             _r,
-            "r_s":           _r_s,
             "max_detectors": _max_detectors,
             "max_attempts":  _max_attempts,
             "contamination": _contamination,

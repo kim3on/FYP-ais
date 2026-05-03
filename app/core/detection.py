@@ -193,7 +193,7 @@ class DetectionEngine:
             "alerts":             alerts,
             "severity_counts":    self._count_severities(alerts),
             "model_used":         self.active_model,
-            "analysed_at":        datetime.now(timezone.utc).isoformat(),
+            "analysed_at":        datetime.utcnow().isoformat(),
         }
 
     def _infer_attack_type(self, row, category: str, novelty_score: float = 0.0) -> str:
@@ -294,33 +294,9 @@ class DetectionEngine:
 
         # ════════════════════════════════════════════════════════════════
         #  STAGE 2 — unlabeled / live traffic: flow-feature heuristics
-        #
-        #  RULE ORDER MATTERS.  More specific signatures (brute force on
-        #  known ports) MUST be checked BEFORE generic volumetric rules
-        #  to avoid misclassifying Patator-style attacks as DDoS.
         # ════════════════════════════════════════════════════════════════
 
-        dst_port_raw = str(g(['Destination Port', 'dst_port'], ''))
-        _brute_ports = {'21': 'FTP', '22': 'SSH', '23': 'Telnet',
-                        '3389': 'RDP', '3306': 'MySQL', '5432': 'PostgreSQL',
-                        '445': 'SMB', '1433': 'MSSQL'}
-
-        # ── 1. Credential brute force (MUST come before volumetric rules) ─
-        # Patator / Hydra flows: TCP, targeting auth ports, small packets,
-        # bidirectional (server responds with auth challenge/reject).
-        if is_tcp and dst_port_raw in _brute_ports:
-            # Relaxed: even short Patator flows (3+ fwd packets) qualify
-            if fwd_pkts >= 3 and avg_size < 600:
-                return f'Brute Force — {_brute_ports[dst_port_raw]}'
-            # Longer interactive sessions on auth ports
-            if fwd_pkts > 20 and fwd_len < 300 and bwd_len < 300:
-                return f'Brute Force — {_brute_ports[dst_port_raw]}'
-
-        # Generic brute force (non-standard ports but small-packet pattern)
-        if is_tcp and fwd_pkts > 20 and fwd_len < 250 and bwd_len < 250 and psh > 10:
-            return 'Credential Brute Force'
-
-        # ── 2. Volumetric floods ──────────────────────────────────────
+        # Volumetric floods
         if pkt_rate > 10_000:
             if is_udp:
                 return 'DDoS — UDP/ICMP Flood'
@@ -329,48 +305,52 @@ class DetectionEngine:
         if pkt_rate > 2_000 and is_tcp and byte_rate > 80_000:
             return 'DoS — Hulk (High Rate)'
 
-        # ── 3. Slow / application-layer DoS ───────────────────────────
+        # Slow / application-layer DoS
         if duration > 300_000_000 and fwd_pkts < 100 and is_tcp:
             return 'DoS — Slowloris'
 
         if duration > 60_000_000 and psh > 5 and fwd_pkts < 200 and is_tcp:
             return 'DoS — GoldenEye'
 
-        # ── 4. Scanning / reconnaissance ──────────────────────────────
+        # Scanning / reconnaissance
         if syn > 0 and fwd_pkts <= 3 and bwd_pkts == 0 and duration < 2_000_000:
             return 'Port Scan — SYN Stealth'
 
         if fwd_pkts <= 2 and bwd_pkts == 0 and duration < 500_000:
             return 'Network Scan'
 
-        # ── 5. Web / application attacks ──────────────────────────────
+        # Credential brute force
+        if fwd_pkts > 20 and fwd_len < 250 and bwd_len < 250 and psh > 10 and is_tcp:
+            return 'Credential Brute Force'
+
+        # Web / application attacks
         if is_tcp and psh > 0 and bwd_len > 800 and fwd_pkts > 5 and fin > 0:
             return 'Web Attack — Data Injection' if bwd_len > 5_000 else 'Web Attack — HTTP Exploit'
 
-        # ── 6. Covert / flag exploits ─────────────────────────────────
+        # Covert / flag exploits
         if urg > 0:
             return 'TCP Exploit — URG Flag'
 
         if rst > fwd_pkts * 0.5 and fwd_pkts > 5:
             return 'TCP RST Injection'
 
-        # ── 7. Amplification (UDP reflection) ─────────────────────────
+        # Amplification (UDP reflection: small request, massive response)
         if is_udp and bwd_len > 1_000 and fwd_pkts <= 3:
             return 'UDP Amplification Attack'
 
-        # ── 8. TLS exploitation ───────────────────────────────────────
+        # TLS exploitation
         if fwd_len < 50 and bwd_len > 5_000 and is_tcp and duration < 5_000_000:
             return 'Heartbleed — TLS Exploit'
 
-        # ── 9. Covert data exfiltration ───────────────────────────────
+        # Covert data exfiltration
         if duration > 500_000_000 and pkt_rate < 50 and bwd_len > fwd_len * 3:
             return 'Data Exfiltration'
 
-        # ── 10. Botnet C&C beacon ─────────────────────────────────────
+        # Botnet C&C beacon (low-and-slow, small regular packets)
         if pkt_rate < 20 and duration > 30_000_000 and avg_size < 200:
             return 'Botnet — C&C Beacon'
 
-        # ── 11. Slow attack fallback ──────────────────────────────────
+        # Legacy flow fallback
         if duration > 100_000_000 and pkt_rate < 200:
             return 'DoS — Slow Attack'
 

@@ -53,8 +53,7 @@ class TrainingPipeline:
 
     def __init__(
         self,
-        r: float = 0.3,
-        r_s: float | None = None,
+        r: float = 0.5,
         max_detectors: int = 500,
         max_attempts: int = 10_000,
         contamination: float = 0.05,
@@ -62,7 +61,6 @@ class TrainingPipeline:
         random_state: int = 42,
     ):
         self.r = r
-        self.r_s = r_s
         self.max_detectors = max_detectors
         self.max_attempts = max_attempts
         self.contamination = contamination
@@ -81,89 +79,119 @@ class TrainingPipeline:
         log_callback=None,       # callable(str) — streams logs to caller
         filename: str = '',      # original upload filename for format detection
     ) -> dict:
-        t0 = datetime.now()
+        """
+        Execute the full training pipeline.
+
+        Returns a JSON-serialisable result dict containing:
+          - nsa_summary      : NSA model metadata
+          - iso_summary      : IsolationForest metadata
+          - nsa_eval         : NSA evaluation metrics
+          - iso_eval         : IsolationForest evaluation metrics
+          - comparison       : side-by-side model comparison
+          - validation_stats : dataset statistics
+          - duration_seconds : total training time
+        """
+        t0 = datetime.utcnow()
 
         def log(msg: str):
-            ts = datetime.now().strftime("%H:%M:%S")
+            ts = datetime.utcnow().strftime("%H:%M:%S")
             full = f"[{ts}] {msg}"
             print(full)
             if log_callback:
                 log_callback(full)
 
-        # ── 1. INITIAL LOAD ──────────────────────────────────────────
+        # ── 1. PRE-PROCESSING ──────────────────────────────────────────
         log("[SYSTEM] Initiating training sequence...")
         preprocessor = CICIDSPreprocessor()
 
         log(f"[INFO] Loading and parsing dataset{' (' + filename + ')' if filename else ''}...")
-        df_raw = preprocessor._load(dataset_source, filename=filename)
-        df_raw, label_col = preprocessor._find_label_col(df_raw)
-        
-        # Clean numeric artefacts in RAW before split
-        num_cols = df_raw.select_dtypes(include=[np.number]).columns
-        df_raw[num_cols] = df_raw[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
-        
-        # Encode binary labels for splitting
-        df_raw, y_all = preprocessor._encode_labels(df_raw, label_col)
+        X_normal, y, df = preprocessor.fit_transform(dataset_source, filename=filename)
+
+        val_stats = preprocessor.validation_stats(y, df)
+        log(f"[OK] Dataset validated: {val_stats['total_records']:,} records.")
+        log(f"[OK] Feature normalization complete — {val_stats['n_features']} features after encoding.")
+        log(f"[OK] Self baseline (normal traffic): {val_stats['normal_records']:,} samples.")
+        log(f"[INFO] Attack traffic in dataset: {val_stats['attack_records']:,} samples.")
 
         # ── 2. TRAIN/TEST SPLIT ────────────────────────────────────────
-        # SPLIT RAW DATA FIRST to ensure no leakage from test set to training scaler
-        log("[INFO] Creating train/test split (raw data) to prevent leakage...")
-        
-        df_train_raw, df_test_raw, y_train, y_test = train_test_split(
-            df_raw, y_all,
+        # CIC-IDS-2017 is all-numeric — preprocessor already returned a
+        # clean feature matrix. We re-scale all rows for evaluation.
+        log("[INFO] Creating train/test split for model evaluation...")
+
+        # Re-apply the fitted scaler to get X_all_scaled from the full cleaned df
+        df_feat = df.drop(columns=[c for c in ['attack_category', 'Label', ' Label', 'label'] if c in df.columns], errors='ignore')
+        # Select only the feature columns the preprocessor registered
+        for col in preprocessor.feature_columns_:
+            if col not in df_feat.columns:
+                df_feat[col] = 0.0
+        df_feat = df_feat[preprocessor.feature_columns_]
+        df_feat = df_feat.select_dtypes(include=[np.number]).fillna(0).replace([np.inf, -np.inf], 0).clip(-1e12, 1e12)
+        X_all_scaled = preprocessor.scaler_.transform(df_feat.values.astype(np.float32))
+
+        X_train_all, X_test, y_train_all, y_test = train_test_split(
+            X_all_scaled, y,
             test_size=self.test_size,
             random_state=self.random_state,
-            stratify=y_all,
+            stratify=y,
         )
 
-        # ── 3. FIT PREPROCESSOR ON TRAINING DATA ONLY ──────────────────
-        log("[INFO] Fitting feature scaler on training portion only...")
-        preprocessor.fit(df_train_raw)
-        
-        # Transform both portions
-        X_train, _ = preprocessor.transform_df(df_train_raw)
-        X_test, df_test_meta = preprocessor.transform_df(df_test_raw)
+        # NSA only sees NORMAL samples during training
+        X_train_normal = X_train_all[y_train_all == 0]
+        log(f"[OK] Train/test split: {len(X_train_all):,} train · {len(X_test):,} test.")
 
-        val_stats = preprocessor.validation_stats(y_all, df_raw)
-        log(f"[OK] Dataset validated: {val_stats['total_records']:,} records.")
-        log(f"[OK] Preprocessor fitted on {len(X_train):,} training samples.")
-        
-        # ── 4. TRAIN NSA ───────────────────────────────────────────────
+        # ── 3. TRAIN NSA ───────────────────────────────────────────────
         log("[NSA] Beginning Negative Selection Algorithm...")
-        # NSA only trains on NORMAL samples
-        X_train_normal = X_train[y_train == 0]
-        
+        log(f"[NSA] Parameters: r={self.r}, max_detectors={self.max_detectors}, "
+            f"max_attempts={self.max_attempts:,}")
+
         nsa = NegativeSelectionDetector(
             r=self.r,
-            r_s=self.r_s,
             max_detectors=self.max_detectors,
             max_attempts=self.max_attempts,
             random_state=self.random_state,
         )
         nsa.fit(X_train_normal)
 
-        log(f"[OK] {nsa.meta_['mature_detectors']:,} V-detectors generated "
-            f"(radius range: {nsa.meta_['det_radius_min']:.3f}–{nsa.meta_['det_radius_max']:.3f}).")
+        log(f"[WARN] {nsa.meta_['candidates_rejected']:,} candidates rejected (self-match).")
+        log(f"[OK] {nsa.meta_['mature_detectors']:,} valid antibodies generated and stored.")
+        cap = nsa.meta_.get('self_match_cap', nsa.meta_.get('n_self_samples', '?'))
+        n_self_total = nsa.meta_.get('n_self_samples', '?')
+        if cap != n_self_total:
+            log(f"[INFO] Self-match used {cap:,}-row subsample of {n_self_total:,} normal rows (speed optimisation).")
 
-        # ── 5. TRAIN ISOLATION FOREST ──────────────────────────────────
+        # ── 4. TRAIN ISOLATION FOREST ──────────────────────────────────
         log("[INFO] Training Isolation Forest baseline...")
         iso = IsolationForestDetector(
             contamination=self.contamination,
             random_state=self.random_state,
         )
-        # Isolation Forest is semi-supervised (trains on mixed data)
-        iso.fit(X_train)
+        iso.fit(X_train_all)
         log("[OK] Isolation Forest training complete.")
 
-        # ── 6. EVALUATE ───────────────────────────────────────────────
-        log("[INFO] Evaluating models on held-out test set...")
+        # ── 5. EVALUATE BOTH MODELS ────────────────────────────────────
+        log("[INFO] Evaluating NSA model on test set...")
         nsa_labels, nsa_scores = nsa.predict_with_scores(X_test)
+
+        log("[INFO] Evaluating Isolation Forest on test set...")
         iso_labels, iso_scores = iso.predict_with_scores(X_test)
+
+        # Build df_meta slice for per-category stats
+        all_indices = list(range(len(y)))
+        _, idx_test = train_test_split(
+            all_indices,
+            test_size=self.test_size,
+            random_state=self.random_state,
+            stratify=y,
+        )
+        df_test_meta = df.iloc[idx_test].reset_index(drop=True)
 
         nsa_result = evaluate_model(y_test, nsa_labels, "AIS (NSA)", df_test_meta)
         iso_result = evaluate_model(y_test, iso_labels, "Isolation Forest", df_test_meta)
 
-        log(f"[OK] NSA F1: {nsa_result.f1:.4f} | ISO F1: {iso_result.f1:.4f}")
+        log(f"[OK] NSA  — Accuracy: {nsa_result.accuracy:.1%}, "
+            f"Recall: {nsa_result.recall:.1%}, F1: {nsa_result.f1:.4f}")
+        log(f"[OK] ISO  — Accuracy: {iso_result.accuracy:.1%}, "
+            f"Recall: {iso_result.recall:.1%}, F1: {iso_result.f1:.4f}")
 
         comparison = compare_models([nsa_result, iso_result])
 
@@ -175,8 +203,8 @@ class TrainingPipeline:
         log("[OK] Models saved successfully.")
 
         # ── 7. COMPILE RESULT ──────────────────────────────────────────
-        duration = (datetime.now() - t0).total_seconds()
-        log(f"[METRICS] Total pipeline duration: {duration:.2f} seconds")
+        duration = (datetime.utcnow() - t0).total_seconds()
+        log(f"[COMPLETE] Training pipeline finished in {duration:.1f}s.")
         log("[SYSTEM] Status: LEARNING → ACTIVE")
 
         result = {

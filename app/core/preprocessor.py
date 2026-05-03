@@ -100,25 +100,32 @@ class CICIDSPreprocessor:
 
     def fit_transform(self, source, label_col=None, filename: str = ''):
         """
-        Legacy entry point for training.
-        Warning: This fits on the provided source. In pipeline context, 
-        ensure only training data is passed here to avoid leakage.
+        Load, clean and scale the dataset.
+
+        Returns
+        -------
+        X_normal : ndarray -- BENIGN rows normalised to [0,1]  (fed to NSA)
+        y        : ndarray -- binary labels for ALL rows
+        df       : DataFrame -- cleaned data with 'attack_category' column
         """
         df = self._load(source, filename=filename)
         df, label_col = self._find_label_col(df, label_col)
 
-        # Clean inf/NaN
+        # Clean inf/NaN in numeric columns BEFORE any further processing
         num_cols = df.select_dtypes(include=[np.number]).columns
         df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
 
+        # Encode labels — adds 'attack_category', drops label column
         df, y = self._encode_labels(df, label_col)
-        
-        # Save attack_category before numeric clean
+
+        # Save attack_category BEFORE _clean() strips non-numeric columns
         attack_cat = df['attack_category'].copy() if 'attack_category' in df.columns else None
 
-        df_clean = self._clean(df) # Sets self.feature_columns_
-        
-        # Re-attach
+        # Clean numeric features
+        df_clean = self._clean(df)
+
+        # Re-attach attack_category to the returned DataFrame so callers can
+        # use it for per-category stats and dashboard display
         if attack_cat is not None:
             df_clean = df_clean.copy()
             df_clean['attack_category'] = attack_cat.values
@@ -128,52 +135,9 @@ class CICIDSPreprocessor:
         X_all_scaled = self.scaler_.fit_transform(X_all)
 
         self.is_fitted_ = True
-        return X_all_scaled[y == 0], y, df_clean
 
-    def fit(self, df: pd.DataFrame, label_col: str = None):
-        """Fit preprocessor on a training DataFrame."""
-        df = df.copy()
-        if label_col:
-            df, _ = self._encode_labels(df, label_col)
-        
-        df_clean = self._clean(df, inference=False) # registers feature_columns_
-        X = df_clean[self.feature_columns_].values.astype(np.float32)
-        
-        self.scaler_ = MinMaxScaler()
-        self.scaler_.fit(X)
-        self.is_fitted_ = True
-        return self
-
-    def transform_df(self, df: pd.DataFrame):
-        """Transform a DataFrame using fitted state."""
-        self._check_fitted()
-        df = df.copy()
-        # Find and encode labels if present (for attack_category extraction)
-        df, label_col = self._find_label_col(df, required=False)
-        if label_col:
-            df, _ = self._encode_labels(df, label_col)
-
-        # Preserve forensic metadata before _clean() strips them
-        _FORENSIC_COLS = ['attack_category', 'Destination Port',
-                          'Source IP', 'Destination IP', 'Protocol',
-                          'Source Port', 'Timestamp']
-        preserved = {}
-        for col in _FORENSIC_COLS:
-            for candidate in [col, col.strip()]:
-                if candidate in df.columns:
-                    preserved[col] = df[candidate].copy()
-                    break
-
-        df_numeric = self._clean(df, inference=True)
-
-        if preserved:
-            df_numeric = df_numeric.copy()
-            for col, series in preserved.items():
-                df_numeric[col] = series.values
-
-        X = df_numeric[self.feature_columns_].values.astype(np.float32)
-        X_scaled = self.scaler_.transform(X)
-        return X_scaled, df_numeric
+        X_normal = X_all_scaled[y == 0]
+        return X_normal, y, df_clean
 
 
     def transform(self, source, filename: str = ''):
@@ -187,29 +151,12 @@ class CICIDSPreprocessor:
         df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
         if label_col:
             df, _ = self._encode_labels(df, label_col)
-
-        # Preserve forensic metadata before _clean() strips them.
-        # These are needed by the detection engine's heuristic classifier
-        # (e.g. Destination Port distinguishes brute-force from DDoS).
-        _FORENSIC_COLS = ['attack_category', 'Destination Port',
-                          'Source IP', 'Destination IP', 'Protocol',
-                          'Source Port', 'Timestamp']
-        preserved = {}
-        for col in _FORENSIC_COLS:
-            # Try exact match and stripped version
-            for candidate in [col, col.strip()]:
-                if candidate in df.columns:
-                    preserved[col] = df[candidate].copy()
-                    break
-
+        # Preserve attack_category before numeric-only clean
+        attack_cat = df['attack_category'].copy() if 'attack_category' in df.columns else None
         df = self._clean(df, inference=True)
-
-        # Re-attach preserved metadata
-        if preserved:
+        if attack_cat is not None:
             df = df.copy()
-            for col, series in preserved.items():
-                df[col] = series.values
-
+            df['attack_category'] = attack_cat.values
         X = df[self.feature_columns_].values.astype(np.float32)
         return self.scaler_.transform(X), df
 
