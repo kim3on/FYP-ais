@@ -2,21 +2,24 @@
   "nsa_summary": {
     "status": "fitted",
     "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
-    "r": 0.3,
-    "r_s": 0.03,
-    "max_detectors": 500,
+    "r": 8.46352481842041,
+    "r_s": 1.045273780822754,
+    "max_detectors": 1330,
     "n_self_samples": 367064,
     "self_match_cap": 5000,
-    "n_features": 77,
-    "attempts": 500,
+    "n_features": 25,
+    "attempts": 1330,
     "candidates_rejected": 0,
     "candidates_rejected_overlap": 0,
-    "mature_detectors": 500,
-    "det_radius_min": 0.1613436030860825,
-    "det_radius_max": 0.5179021663428891,
-    "det_radius_mean": 0.34388668880569945,
-    "trained_at": "2026-05-03T08:04:54.482851+00:00",
-    "active_antibodies": 500
+    "mature_detectors": 1330,
+    "det_radius_min": 5.682822189853125,
+    "det_radius_max": 32.21567836279454,
+    "det_radius_mean": 16.641090396954816,
+    "auto_threshold": true,
+    "r_fitted": 8.463525,
+    "r_s_fitted": 1.045274,
+    "trained_at": "2026-05-10T09:55:29.714366+00:00",
+    "active_antibodies": 1330
   },
   "iso_summary": {
     "status": "fitted",
@@ -24,56 +27,56 @@
     "contamination": 0.05,
     "n_estimators": 100,
     "n_training_samples": 367064,
-    "n_features": 77,
-    "trained_at": "2026-05-03T08:04:56.958464"
+    "n_features": 25,
+    "trained_at": "2026-05-10T09:55:31.818032"
   },
   "nsa_eval": {
     "model_name": "AIS (NSA)",
-    "accuracy": 1.0,
+    "accuracy": 0.9998,
     "precision": 0.0,
     "recall": 0.0,
     "f1": 0.0,
     "tp": 0,
-    "tn": 91764,
-    "fp": 3,
+    "tn": 91748,
+    "fp": 19,
     "fn": 0,
-    "false_positive_rate": 0.0,
+    "false_positive_rate": 0.0002,
     "detection_rate": 0.0,
     "per_category": {
       "normal": {
-        "correct": 91764,
+        "correct": 91748,
         "total": 91767,
-        "rate": 1.0
+        "rate": 0.9998
       }
     },
     "n_samples": 91767,
     "n_attacks": 0,
     "n_normal": 91767,
-    "evaluated_at": "2026-05-03T08:05:02.556462"
+    "evaluated_at": "2026-05-10T09:55:38.496648"
   },
   "iso_eval": {
     "model_name": "Isolation Forest",
-    "accuracy": 0.9497,
+    "accuracy": 0.95,
     "precision": 0.0,
     "recall": 0.0,
     "f1": 0.0,
     "tp": 0,
-    "tn": 87153,
-    "fp": 4614,
+    "tn": 87181,
+    "fp": 4586,
     "fn": 0,
-    "false_positive_rate": 0.0503,
+    "false_positive_rate": 0.05,
     "detection_rate": 0.0,
     "per_category": {
       "normal": {
-        "correct": 87153,
+        "correct": 87181,
         "total": 91767,
-        "rate": 0.9497
+        "rate": 0.95
       }
     },
     "n_samples": 91767,
     "n_attacks": 0,
     "n_normal": 91767,
-    "evaluated_at": "2026-05-03T08:05:02.607278"
+    "evaluated_at": "2026-05-10T09:55:38.548526"
   },
   "comparison": {
     "models": [
@@ -82,8 +85,8 @@
     ],
     "metrics": {
       "accuracy": {
-        "AIS (NSA)": 0.9999673085095949,
-        "Isolation Forest": 0.9497204877570369
+        "AIS (NSA)": 0.9997929538941014,
+        "Isolation Forest": 0.9500256083341506
       },
       "precision": {
         "AIS (NSA)": 0.0,
@@ -98,8 +101,8 @@
         "Isolation Forest": 0.0
       },
       "false_positive_rate": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0503
+        "AIS (NSA)": 0.0002,
+        "Isolation Forest": 0.05
       },
       "detection_rate": {
         "AIS (NSA)": 0.0,
@@ -127,6 +130,6 @@
     },
     "dataset": "CIC-IDS-2017"
   },
-  "duration_seconds": 12.3,
-  "trained_at": "2026-05-03T16:04:50.454324"
+  "duration_seconds": 13.91,
+  "trained_at": "2026-05-10T17:55:24.723291"
 }

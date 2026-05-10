@@ -35,7 +35,7 @@ import io
 import os
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import RobustScaler
 import joblib
 
 
@@ -60,6 +60,9 @@ ATTACK_CATEGORIES = {
     'web attack - brute force':     'Web Attack',
     'web attack - xss':             'Web Attack',
     'web attack - sql injection':   'Web Attack',
+    'web attack \u2013 brute force':     'Web Attack',   # em-dash variant in CSV
+    'web attack \u2013 xss':             'Web Attack',
+    'web attack \u2013 sql injection':   'Web Attack',
     'infiltration':                 'Infiltration',
     'heartbleed':                   'Heartbleed',
 }
@@ -89,8 +92,10 @@ class CICIDSPreprocessor:
         X_scaled, df = prep.transform(csv_path_or_bytes)
     """
 
-    def __init__(self):
-        self.scaler_: MinMaxScaler | None = None
+    def __init__(self, n_pca_components: float | int | None = 0.95):
+        self.n_pca_components = n_pca_components
+        self.pca_ = None
+        self.scaler_: RobustScaler | None = None
         self.feature_columns_: list | None = None
         self.is_fitted_: bool = False
 
@@ -124,8 +129,14 @@ class CICIDSPreprocessor:
             df_clean['attack_category'] = attack_cat.values
 
         X_all = df_clean[self.feature_columns_].values.astype(np.float32)
-        self.scaler_ = MinMaxScaler()
+        self.scaler_ = RobustScaler()
         X_all_scaled = self.scaler_.fit_transform(X_all)
+
+        if self.n_pca_components:
+            from sklearn.decomposition import PCA
+            self.pca_ = PCA(n_components=self.n_pca_components, random_state=42,
+                            svd_solver='full', whiten=True)
+            X_all_scaled = self.pca_.fit_transform(X_all_scaled).astype(np.float32)
 
         self.is_fitted_ = True
         return X_all_scaled[y == 0], y, df_clean
@@ -139,8 +150,15 @@ class CICIDSPreprocessor:
         df_clean = self._clean(df, inference=False) # registers feature_columns_
         X = df_clean[self.feature_columns_].values.astype(np.float32)
         
-        self.scaler_ = MinMaxScaler()
-        self.scaler_.fit(X)
+        self.scaler_ = RobustScaler()
+        X_scaled = self.scaler_.fit_transform(X)
+        
+        if self.n_pca_components:
+            from sklearn.decomposition import PCA
+            self.pca_ = PCA(n_components=self.n_pca_components, random_state=42,
+                            svd_solver='full', whiten=True)
+            self.pca_.fit(X_scaled)
+
         self.is_fitted_ = True
         return self
 
@@ -173,6 +191,8 @@ class CICIDSPreprocessor:
 
         X = df_numeric[self.feature_columns_].values.astype(np.float32)
         X_scaled = self.scaler_.transform(X)
+        if self.pca_ is not None:
+            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
         return X_scaled, df_numeric
 
 
@@ -211,7 +231,10 @@ class CICIDSPreprocessor:
                 df[col] = series.values
 
         X = df[self.feature_columns_].values.astype(np.float32)
-        return self.scaler_.transform(X), df
+        X_scaled = self.scaler_.transform(X)
+        if self.pca_ is not None:
+            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        return X_scaled, df
 
 
     def transform_dataframe(self, df: pd.DataFrame) -> np.ndarray:
@@ -222,7 +245,10 @@ class CICIDSPreprocessor:
             if col not in df.columns:
                 df[col] = 0.0
         X = df[self.feature_columns_].values.astype(np.float32)
-        return self.scaler_.transform(X)
+        X_scaled = self.scaler_.transform(X)
+        if self.pca_ is not None:
+            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        return X_scaled
 
     # ------------------------------------------------------------------ #
     #  INTERNAL                                                            #

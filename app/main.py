@@ -26,7 +26,6 @@ Production  : Run `npm run build` in frontend/ — output lands in
               so the entire app is served from a single uvicorn process.
 """
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -35,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.routers import auth, training, detection, alerts, capture, dashboard, firewall
+from app.routers.auth import get_password_hash
 from app.core.database import engine
 from app.models.db_models import Base, BlockedIPDB, UserDB
 from app.core.database import SessionLocal
@@ -74,8 +74,8 @@ def on_startup():
     # Seed users if database is empty
     if db.query(UserDB).count() == 0:
         db.add_all([
-            UserDB(username="admin", password="password", role="Network Administrator"),
-            UserDB(username="analyst", password="analyst123", role="Security Analyst")
+            UserDB(username="admin", password=get_password_hash("password"), role="Network Administrator"),
+            UserDB(username="analyst", password=get_password_hash("analyst123"), role="Security Analyst")
         ])
         db.commit()
 

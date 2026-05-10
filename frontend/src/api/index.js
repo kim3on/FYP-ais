@@ -39,6 +39,24 @@ export async function markFalsePositive(alertId) {
 export async function clearAlerts() {
   return apiFetch('/api/alerts', { method: 'DELETE' });
 }
+export async function exportAlertsCSV(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const url = `/api/alerts/export.csv${query.toString() ? `?${query}` : ''}`;
+  const res = await fetch(url, { headers: authHeader() });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  return {
+    blob,
+    filename: match?.[1] || `alerts_analysis_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+  };
+}
 
 // ── Training ──────────────────────────────────────────────────
 export async function startTraining(file, params = {}) {

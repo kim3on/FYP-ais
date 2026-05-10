@@ -9,14 +9,19 @@ POST /api/detect/sample      — detect anomaly in a single JSON flow
 
 import traceback
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, Depends
 from typing import Optional
 from datetime import datetime
 
 from app.core.pipeline import models_ready
 from app.state import _state, _build_engine
+from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/api/detect", tags=["detection"])
+router = APIRouter(
+    prefix="/api/detect",
+    tags=["detection"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post("")
@@ -79,13 +84,19 @@ async def detect(
                 try:
                     db_alerts = []
                     for a in result["alerts"]:
+                        # Safely convert dst_port to int, defaulting to 0 if 'N/A' or invalid
+                        try:
+                            dst_port = int(a.get("dst_port", 0) or 0)
+                        except (ValueError, TypeError):
+                            dst_port = 0
+
                         db_alerts.append(AlertDB(
                             alert_id=a["alert_id"],
                             timestamp=a["timestamp"],
                             attack_type=a["attack_type"],
                             src_ip=a.get("src_ip", "N/A"),
                             dst_ip=a.get("dst_ip", "N/A"),
-                            dst_port=int(a.get("dst_port", 0) or 0),
+                            dst_port=dst_port,
                             protocol=a.get("protocol", "N/A"),
                             severity=a["severity"],
                             confidence=a["confidence"],

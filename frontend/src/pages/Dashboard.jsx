@@ -19,22 +19,105 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement,
 
 const LINE_OPTS = {
   responsive: true, maintainAspectRatio: false, animation: false,
-  plugins: { legend: { display: false } },
+  interaction: { intersect: false, mode: 'index' },
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: context => {
+          return `${context.dataset.label}: ${context.parsed.y} packets / flow`;
+        },
+      },
+    },
+  },
   scales: {
-    x: { grid: { color: '#403d52' }, ticks: { color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } } },
-    y: { grid: { color: '#403d52' }, ticks: { color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } } },
+    x: {
+      title: { display: true, text: 'Time', color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } },
+      grid: { display: false, drawBorder: false },
+      ticks: { color: '#908caa', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0 },
+      border: { display: false },
+    },
+    y: {
+      title: { display: true, text: 'Packets / flow', color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } },
+      grid: { display: false, drawBorder: false },
+      ticks: { color: '#908caa', font: { family: 'JetBrains Mono', size: 10 }, precision: 0 },
+      border: { display: false },
+      beginAtZero: true,
+    },
   },
 };
+
+const TRAFFIC_NORMAL_COLOR = '#2f80ff';
+const TRAFFIC_ANOMALY_COLOR = '#ff2b2b';
 
 const DONUT_OPTS = {
   responsive: true, maintainAspectRatio: false, animation: false,
   plugins: { legend: { display: false } },
 };
 
+// ── SVG icons for metric cards ──────────────────────────────────────────────
+const IcoList    = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
+const IcoTrend   = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>;
+const IcoWarn    = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IcoShield  = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
+const IcoCheck   = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>;
+const IcoBio     = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="11.5" r="2.5"/><path d="M12 2a4.5 4.5 0 0 1 4.5 4.5c0 1.33-.58 2.52-1.5 3.35"/><path d="M12 2a4.5 4.5 0 0 0-4.5 4.5c0 1.33.58 2.52 1.5 3.35"/><path d="M8.5 14.5A4.5 4.5 0 0 0 12 21a4.5 4.5 0 0 0 3.5-6.5"/><path d="M5.5 13A4.5 4.5 0 0 0 9 21"/><path d="M18.5 13A4.5 4.5 0 0 1 15 21"/></svg>;
+const IcoZap     = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
+
+// ── Severity badge colours (matching reference image) ────────────────────────
+const SEVERITY_BADGE = {
+  LOW:      { label: 'LOW',      bg: '#3b82f6', color: '#fff' },
+  MEDIUM:   { label: 'MEDIUM',   bg: '#eab308', color: '#1a1a1a' },
+  HIGH:     { label: 'HIGH',     bg: '#f97316', color: '#fff' },
+  CRITICAL: { label: 'CRITICAL', bg: '#ef4444', color: '#fff' },
+};
+
+function getSeverityLevel(alerts) {
+  const hasCritical = alerts.some(a => (a.severity||'').toLowerCase() === 'critical');
+  if (hasCritical) return 'CRITICAL';
+  const hasHigh = alerts.some(a => (a.severity||'').toLowerCase() === 'high');
+  if (hasHigh) return 'HIGH';
+  const hasMedium = alerts.some(a => (a.severity||'').toLowerCase() === 'medium');
+  if (hasMedium) return 'MEDIUM';
+  return 'LOW';
+}
+
+// ── Metric Card ───────────────────────────────────────────────────────────────
+function StatCard({ icon, iconColor, topRight, label, value, sub, subColor }) {
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)', padding: '18px 20px',
+      display: 'flex', flexDirection: 'column', gap: '10px',
+    }}>
+      {/* Top row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <span style={{ color: iconColor || 'var(--accent)' }}>{icon}</span>
+        {topRight}
+      </div>
+      {/* Label + Value */}
+      <div>
+        <div style={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-tertiary)', marginBottom: '4px' }}>
+          {label}
+        </div>
+        <div style={{ fontSize: '28px', fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>
+          {value}
+        </div>
+      </div>
+      {/* Subtitle */}
+      {sub && (
+        <div style={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: subColor || 'var(--text-tertiary)' }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const {
     alerts, setAlerts,
-    systemStatus, dashStats,
+    dashStats,
     refreshStatus, refreshDashStats,
     captureRunning, setCaptureRunning,
     pushAlert,
@@ -192,19 +275,56 @@ export default function Dashboard() {
 
   // Derived stats
   const totalAlerts   = alerts.length;
-  const criticalCount = alerts.filter(a=>(a.severity||'').toLowerCase()==='critical').length;
   const zeroDayCount  = alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length;
-  const highCount     = alerts.filter(a=>(a.severity||'').toLowerCase()==='high').length;
+
+  const safeLiveNormal = Array.isArray(liveNormal) ? liveNormal : [];
+  const safeLiveAnomaly = Array.isArray(liveAnomaly) ? liveAnomaly : [];
+  const hasLiveSession =
+    captureRunning ||
+    livePktCount > 0 ||
+    liveFlowCount > 0 ||
+    safeLiveNormal.some(v => (v ?? 0) > 0) ||
+    safeLiveAnomaly.some(v => (v ?? 0) > 0);
+  const normalSource = hasLiveSession ? safeLiveNormal : dashStats?.chart_normal;
+  const anomalySource = hasLiveSession ? safeLiveAnomaly : dashStats?.chart_anomaly;
+  const normalSeries  = Array.isArray(normalSource) ? normalSource : new Array(20).fill(0);
+  const anomalySeries = Array.isArray(anomalySource) ? anomalySource : new Array(20).fill(0);
+  const seriesLen = Math.max(normalSeries.length, anomalySeries.length) || 20;
 
   // Traffic chart — live ring-buffer while capturing, fallback to dashStats
-  const chartLabels = captureRunning
-    ? Array.from({length: CHART_LEN}, (_, i) => i % 10 === 0 ? `-${CHART_LEN - i}s` : '')
-    : (dashStats?.chart_labels || Array.from({length:20},(_,i)=>`T-${20-i}`));
+  const chartLabels = Array.from({ length: seriesLen }, (_, i) => {
+    const secondsAgo = seriesLen - i - 1;
+    if (secondsAgo === 0) return 'Now';
+    return secondsAgo % 10 === 0 ? `${secondsAgo}s ago` : '';
+  });
+  const combinedTraffic = Array.from({ length: seriesLen }, (_, i) => {
+    return (normalSeries[i] ?? 0) + (anomalySeries[i] ?? 0);
+  });
+  const anomalyTraffic = combinedTraffic.map((value, i) => (anomalySeries[i] ?? 0) > 0 ? value : null);
   const trafficData = {
     labels: chartLabels,
     datasets: [
-      { label:'Normal',  data: captureRunning ? liveNormal  : (dashStats?.chart_normal  || new Array(20).fill(0)), borderColor:'#9ccfd8', backgroundColor:'rgba(156,207,216,0.08)', fill:true, tension:0.35, pointRadius:0 },
-      { label:'Anomaly', data: captureRunning ? liveAnomaly : (dashStats?.chart_anomaly || new Array(20).fill(0)), borderColor:'#eb6f92', backgroundColor:'rgba(235,111,146,0.08)', fill:true, tension:0.35, pointRadius:0 },
+      {
+        label: 'Normal Packets',
+        data: combinedTraffic,
+        borderColor: TRAFFIC_NORMAL_COLOR,
+        backgroundColor: 'transparent',
+        fill: false,
+        tension: 0.35,
+        pointRadius: 0,
+        borderWidth: 2,
+      },
+      {
+        label: 'Anomalies',
+        data: anomalyTraffic,
+        borderColor: TRAFFIC_ANOMALY_COLOR,
+        backgroundColor: 'transparent',
+        fill: false,
+        tension: 0.35,
+        pointRadius: 0,
+        borderWidth: 2,
+        spanGaps: true,
+      },
     ],
   };
 
@@ -218,68 +338,85 @@ export default function Dashboard() {
 
   // Which alerts to show in table — live if capturing, else recent stored
   const tableAlerts = captureRunning ? liveAlerts : alerts.slice(0, 15);
+
+
+
   const tableTitle  = captureRunning
     ? `Live Alerts — ${liveAlerts.length} captured this session`
     : `Recent Alerts — latest ${Math.min(alerts.length,15)} of ${totalAlerts}`;
 
   // Packet/flow counts — live WS values while capturing, else API counters
-  const displayPkts  = captureRunning ? livePktCount     : (captureStatus?.packets_captured ?? null);
-  const displayFlows = captureRunning ? liveFlowCount    : (captureStatus?.flows_completed  ?? null);
+  const displayPkts  = captureRunning ? livePktCount  : (captureStatus?.packets_captured ?? null);
+
+  // Count anomalies in the last 5 minutes from the relevant alert source
+  const alertsSource = captureRunning ? liveAlerts : alerts;
+  const recentAnomalyCount = alertsSource.filter(a => {
+    const ts = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const now = new Date().getTime(); // Still impure, but let's see if this format is preferred or if we should use useMemo
+    return ts >= (now - 5 * 60 * 1000);
+  }).length;
+
+  const sevLevel = getSeverityLevel(alerts);
+  const badge = SEVERITY_BADGE[sevLevel];
 
   return (
     <div className="page">
-      <div className="page-header flex justify-between items-center">
-        <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">System overview · live capture · threat monitoring</p>
-        </div>
+      <div className="page-header">
+        <h1 className="page-title">Dashboard</h1>
+        <p className="page-subtitle">System overview · live capture · threat monitoring</p>
       </div>
 
-      {/* ── Stat Cards ─────────────────────────────────────────── */}
-      <div className="stat-grid" style={{marginBottom:'16px'}}>
-        <div className="stat-card">
-          <div className="stat-label">Total Alerts</div>
-          <div className="stat-value">{totalAlerts}</div>
-        </div>
-        <div className="stat-card" style={{borderColor:criticalCount>0?'var(--danger-border)':'var(--border)'}}>
-          <div className="stat-label" style={{color:'var(--danger)'}}>Critical</div>
-          <div className="stat-value" style={{color:criticalCount>0?'var(--danger)':'var(--text-primary)'}}>{criticalCount}</div>
-        </div>
-        <div className="stat-card" style={{borderColor:highCount>0?'var(--warning-border)':'var(--border)'}}>
-          <div className="stat-label" style={{color:'var(--warning)'}}>High</div>
-          <div className="stat-value" style={{color:highCount>0?'var(--warning)':'var(--text-primary)'}}>{highCount}</div>
-        </div>
-        <div className="stat-card" style={{borderColor:zeroDayCount>0?'var(--iris-border)':'var(--border)'}}>
-          <div className="stat-label" style={{color:'var(--iris)'}}>Zero-Day</div>
-          <div className="stat-value" style={{color:zeroDayCount>0?'var(--iris)':'var(--text-primary)'}}>{zeroDayCount}</div>
-        </div>
-        <div className="stat-card" style={{borderColor: captureRunning ? 'var(--accent-border, var(--border))' : 'var(--border)'}}>
-          <div className="stat-label">Packets (session)</div>
-          <div className="stat-value" style={{fontSize:'20px',color: captureRunning ? 'var(--accent)' : 'var(--text-primary)'}}>
-            {displayPkts != null ? displayPkts.toLocaleString() : '—'}
-          </div>
-        </div>
-        <div className="stat-card" style={{borderColor: captureRunning && liveAnomalyCount > 0 ? 'var(--danger-border)' : 'var(--border)'}}>
-          <div className="stat-label">Anomalies (session)</div>
-          <div className="stat-value" style={{fontSize:'20px',color: captureRunning && liveAnomalyCount > 0 ? 'var(--danger)' : 'var(--text-primary)'}}>
-            {captureRunning ? liveAnomalyCount.toLocaleString() : '—'}
-          </div>
-        </div>
-        <div className="stat-card" style={{borderColor: captureRunning ? 'var(--success-border, var(--border))' : 'var(--border)'}}>
-          <div className="stat-label">Flows (session)</div>
-          <div className="stat-value" style={{fontSize:'20px',color: captureRunning ? 'var(--success)' : 'var(--text-primary)'}}>
-            {captureRunning ? displayFlows.toLocaleString() : '—'}
-          </div>
-        </div>
+      {/* ── Metric Cards ─────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+        <StatCard
+          icon={<IcoList />} iconColor="#3b82f6"
+          topRight={<span style={{ color: 'var(--success)' }}><IcoTrend /></span>}
+          label="Total Packets"
+          value={displayPkts != null ? displayPkts.toLocaleString() : '—'}
+          sub="From live capture session"
+          subColor="var(--success)"
+        />
+        <StatCard
+          icon={<IcoWarn />} iconColor="var(--danger)"
+          topRight={(
+            <span style={{
+              background: badge.bg, color: badge.color,
+              fontSize: '9px', fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 800, letterSpacing: '0.07em', textTransform: 'uppercase',
+              padding: '3px 8px', borderRadius: '4px',
+            }}>{badge.label}</span>
+          )}
+          label="Anomalies Detected"
+          value={captureRunning ? liveAnomalyCount.toLocaleString() : totalAlerts.toLocaleString()}
+          sub={`${recentAnomalyCount} in last 5 minutes`}
+          subColor="var(--success)"
+        />
+        <StatCard
+          icon={<IcoShield />} iconColor="#3b82f6"
+          topRight={<span style={{ color: 'var(--success)' }}><IcoCheck /></span>}
+          label="Active Antibodies"
+          value={(dashStats?.active_antibodies ?? 0).toLocaleString()}
+          sub="Generated via Negative Selection"
+          subColor="var(--accent)"
+        />
+        <StatCard 
+          icon={<IcoBio />} iconColor="var(--iris, #9ccfd8)"
+          topRight={<span style={{ color: 'var(--iris, #9ccfd8)' }}><IcoZap /></span>}
+          label="Zero-Day Candidates"
+          value={zeroDayCount.toLocaleString()}
+          sub="Threats with no detector match"
+          subColor="var(--iris, #9ccfd8)"
+        />
       </div>
+
 
       {/* ── Charts Row ─────────────────────────────────────────── */}
       <div className="two-col" style={{marginBottom:'16px'}}>
         <div className="card">
-          <div className="section-label">Traffic — Normal vs Anomaly</div>
+          <div className="section-label">Live Network Traffic</div>
           <div className="dash-legend">
-            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:'#9ccfd8'}}/>Normal</div>
-            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:'#eb6f92'}}/>Anomaly</div>
+            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:TRAFFIC_NORMAL_COLOR}}/>Normal Packets</div>
+            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:TRAFFIC_ANOMALY_COLOR}}/>Anomalies</div>
           </div>
           <div style={{height:'150px',marginTop:'10px'}}>
             <Line data={trafficData} options={LINE_OPTS} />

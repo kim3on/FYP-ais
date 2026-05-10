@@ -1,5 +1,13 @@
 import { useEffect, useCallback, useState } from 'react';
-import { getAlerts, markFalsePositive, blockIP, unblockIP, getBlockedIPs, clearAlerts } from '../api';
+import {
+  getAlerts,
+  markFalsePositive,
+  blockIP,
+  unblockIP,
+  getBlockedIPs,
+  clearAlerts,
+  exportAlertsCSV as exportAlertsAnalysisCSV,
+} from '../api';
 import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
@@ -102,33 +110,26 @@ export default function Alerts() {
     }
   }
 
-  function exportAlertsCSV() {
+  async function exportAlertsCSV() {
     if (filtered.length === 0) return;
-    const header = ['Timestamp', 'Attack Type', 'Severity', 'Confidence', 'Source IP', 'Dest IP', 'Port', 'Protocol', 'False Positive'];
-    const csv = [
-      header.join(','),
-      ...filtered.map(a => [
-        a.timestamp || new Date().toISOString(),
-        a.attack_type,
-        a.severity,
-        a.confidence != null ? `${Math.round(a.confidence*100)}%` : '',
-        a.src_ip || 'N/A',
-        a.dst_ip || 'N/A',
-        a.dst_port || 'N/A',
-        a.protocol || 'N/A',
-        a.is_false_positive ? 'Yes' : 'No'
-      ].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `alerts_export_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const params = {};
+      if (filter === 'critical' || filter === 'high') params.severity = filter;
+      if (filter === 'zero-day') params.zero_day_only = true;
+
+      const { blob, filename } = await exportAlertsAnalysisCSV(params);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export alerts:", err);
+      alert(err.message || 'Failed to export alerts');
+    }
   }
 
   return (

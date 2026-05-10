@@ -86,6 +86,16 @@ export function AppProvider({ children }) {
     }
   }, []);
 
+  // Auto-boot: load all data immediately on mount
+  useEffect(() => {
+    const init = async () => {
+      await refreshStatus();
+      await refreshDashStats();
+      await refreshAlerts();
+    };
+    init();
+  }, [refreshStatus, refreshDashStats, refreshAlerts]);
+
   return (
     <AppContext.Provider value={{
       alerts, setAlerts, pushAlert, refreshAlerts,

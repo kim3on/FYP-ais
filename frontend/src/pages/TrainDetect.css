@@ -32,3 +32,22 @@
   padding: 8px 12px; border-radius: var(--radius);
   font-size: 12px; font-family: var(--font-mono);
 }
+
+.td-summary-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex: 0 0 14px;
+}
+
+.td-summary-icon.accent {
+  filter: drop-shadow(0 0 4px var(--accent-subtle));
+}
+
+.td-summary-icon.success {
+  filter: drop-shadow(0 0 4px var(--success-subtle));
+}
+
+.td-summary-icon.iris {
+  filter: drop-shadow(0 0 4px var(--iris-subtle));
+}

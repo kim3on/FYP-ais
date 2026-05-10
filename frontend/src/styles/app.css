@@ -218,6 +218,7 @@ code, pre, kbd, samp, .mono, .font-mono {
 .btn-danger:hover:not(:disabled) { background: var(--danger-hover); box-shadow: 0 0 10px rgba(235,111,146,0.3); }
 
 .btn-ghost {
+  background: transparent;
   color: var(--text-secondary);
 }
 .btn-ghost:hover:not(:disabled) { background: var(--accent-subtle); color: var(--accent); }

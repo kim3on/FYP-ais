@@ -168,6 +168,7 @@ export default function Training() {
                   ['Precision', result.precision != null ? `${(result.precision*100).toFixed(1)}%` : '—'],
                   ['Recall', result.recall != null ? `${(result.recall*100).toFixed(1)}%` : '—'],
                   ['F1 Score', result.f1 != null ? `${(result.f1*100).toFixed(1)}%` : '—'],
+                  ['False Pos. Rate', result.false_positive_rate != null ? `${(result.false_positive_rate*100).toFixed(1)}%` : '—'],
                 ].map(([label,val])=>(
                   <div key={label} style={{background:'var(--bg-overlay)',borderRadius:'var(--radius)',padding:'10px 12px'}}>
                     <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',marginBottom:'4px'}}>{label}</div>

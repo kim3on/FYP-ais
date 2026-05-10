@@ -2,9 +2,88 @@ import { useState, useEffect } from 'react';
 import { getSystemStatus, getModelSummary, updateSettings, clearRawFlows } from '../api';
 import { useApp } from '../hooks/useApp';
 import '../components/Layout/Layout.css';
+import './Settings.css';
+
+const MODELS = [
+  {
+    id: 'nsa',
+    name: 'Artificial Immune System (AIS)',
+    short: 'AIS',
+    desc: 'Bio-inspired detector profile for normal traffic and novelty scoring.',
+  },
+  {
+    id: 'isolation_forest',
+    name: 'Isolation Forest',
+    short: 'IF',
+    desc: 'Statistical baseline for anomaly comparison.',
+  },
+];
+
+const ALERT_PRESETS = [
+  { label: 'Low', desc: 'All anomalies', value: 0.35 },
+  { label: 'Medium', desc: 'Significant threats', value: 0.5 },
+  { label: 'High', desc: 'Critical only', value: 0.75 },
+];
+
+const ShieldIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 2 5 5v6c0 4.5 2.9 8.7 7 10 4.1-1.3 7-5.5 7-10V5l-7-3Z" />
+  </svg>
+);
+
+const BellIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+  </svg>
+);
+
+const DataIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <rect x="4" y="5" width="16" height="3" rx="1" />
+    <rect x="4" y="10.5" width="16" height="3" rx="1" />
+    <rect x="4" y="16" width="16" height="3" rx="1" />
+  </svg>
+);
+
+const PulseIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 12h4l2-6 4 12 2-6h6" />
+  </svg>
+);
+
+function SettingSection({ icon, tone = 'accent', title, children, action }) {
+  return (
+    <section className="settings-section">
+      <div className={`settings-section-icon ${tone}`}>{icon}</div>
+      <div className="settings-section-body">
+        <div className="settings-section-head">
+          <h2>{title}</h2>
+          {action}
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function FieldBlock({ label, children }) {
+  return (
+    <div className="settings-field">
+      <div className="settings-field-label">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function formatStatus(value) {
+  if (value == null || value === '') return 'Unknown';
+  return String(value).replace(/_/g, ' ');
+}
 
 export default function Settings() {
   const { activeModel, setActiveModel, refreshStatus } = useApp();
+  const [systemStatus, setSystemStatus] = useState(null);
   const [modelInfo, setModelInfo]   = useState(null);
   const [threshold, setThreshold]   = useState(0.5);
   const [zdThreshold, setZdThreshold] = useState(0.65);
@@ -14,6 +93,7 @@ export default function Settings() {
 
   useEffect(() => {
     getSystemStatus().then(s => {
+      setSystemStatus(s);
       if (s.active_model) setActiveModel(s.active_model);
       if (s.threshold)    setThreshold(s.threshold);
     }).catch(err => {
@@ -52,140 +132,156 @@ export default function Settings() {
   }
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">Configure detection model and threshold parameters</p>
-      </div>
-
-      <div className="two-col">
-        {/* Left — model selector */}
-        <div style={{display:'flex',flexDirection:'column',gap:'14px'}}>
-          <div className="card">
-            <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'16px'}}>
-              Active Detection Model
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
-              {[
-                {
-                  id:'nsa',
-                  name:'Negative Selection Algorithm',
-                  desc:'Bio-inspired AIS model. Learns a "Self" profile of normal traffic and flags deviations. Supports zero-day detection through novelty scoring.',
-                  badge:'Recommended',
-                  badgeColor:'var(--success)',
-                },
-                {
-                  id:'isolation_forest',
-                  name:'Isolation Forest',
-                  desc:'Statistical baseline using random tree isolation. Faster but less interpretable. Used for performance comparison against the NSA.',
-                  badge:'Baseline',
-                  badgeColor:'var(--rp-muted)',
-                },
-              ].map(m => (
-                <div
-                  key={m.id}
-                  onClick={()=>setActiveModel(m.id)}
-                  style={{
-                    background: activeModel===m.id ? 'var(--accent-subtle)' : 'var(--bg-overlay)',
-                    border: `1px solid ${activeModel===m.id ? 'var(--accent)' : 'var(--border)'}`,
-                    borderRadius:'var(--radius)',padding:'14px',cursor:'pointer',
-                    transition:'all var(--transition)',
-                  }}
-                >
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
-                    <span style={{fontFamily:'var(--font-mono)',fontWeight:600,fontSize:'13px',color:activeModel===m.id?'var(--accent)':'var(--text-primary)'}}>
-                      {m.name}
-                    </span>
-                    <span style={{fontSize:'9px',fontFamily:'var(--font-mono)',fontWeight:700,textTransform:'uppercase',color:m.badgeColor,letterSpacing:'0.06em'}}>
-                      {m.badge}
-                    </span>
-                  </div>
-                  <p style={{fontSize:'11px',color:'var(--text-tertiary)',lineHeight:'1.5'}}>{m.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Model info */}
-          {modelInfo && (
-            <div className="card">
-              <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'12px'}}>
-                Loaded Model Info
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-                {Object.entries(modelInfo).map(([k,v])=>(
-                  <div key={k} style={{display:'flex',justifyContent:'space-between',fontSize:'12px',fontFamily:'var(--font-mono)'}}>
-                    <span style={{color:'var(--text-tertiary)'}}>{k}</span>
-                    <span style={{color:'var(--text-primary)',fontWeight:500}}>{String(v)}</span>
-                  </div>
+    <div className="page settings-page">
+      <div className="settings-stack">
+        <SettingSection
+          icon={<ShieldIcon />}
+          tone="accent"
+          title="Detection Settings"
+          action={
+            <button className="btn btn-primary settings-save" onClick={handleSave}>
+              Save Settings
+            </button>
+          }
+        >
+          <div className="settings-grid two">
+            <FieldBlock label="Active Model">
+              <div className="settings-model-list">
+                {MODELS.map(model => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    className={`settings-model ${activeModel === model.id ? 'active' : ''}`}
+                    onClick={() => setActiveModel(model.id)}
+                  >
+                    <span>{model.name}</span>
+                    <small>{model.desc}</small>
+                  </button>
                 ))}
               </div>
+            </FieldBlock>
+
+            <FieldBlock label="Runtime State">
+              <div className="settings-status-grid">
+                <div>
+                  <span>Model Status</span>
+                  <strong className={systemStatus?.models_ready ? 't-success' : 't-warning'}>
+                    {systemStatus?.models_ready ? 'Ready' : 'Not Ready'}
+                  </strong>
+                </div>
+                <div>
+                  <span>Active Engine</span>
+                  <strong>{MODELS.find(m => m.id === activeModel)?.short || activeModel.toUpperCase()}</strong>
+                </div>
+              </div>
+            </FieldBlock>
+          </div>
+
+          {(error || saved) && (
+            <div className={`settings-message ${error ? 'error' : 'saved'}`}>
+              {error || 'Settings saved'}
             </div>
           )}
+        </SettingSection>
 
-          {/* Database Management */}
-          <div className="card">
-            <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'12px'}}>
-              Database Management
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-              <p style={{fontSize:'11px',color:'var(--text-tertiary)',lineHeight:'1.5'}}>
-                Raw network flows captured during live sniffer sessions are saved to the SQLite database for system testing purposes. They can grow very large over time.
-              </p>
-              <button 
-                className="btn btn-default" 
-                style={{color:'var(--danger)',borderColor:'var(--danger-border)',justifyContent:'center',marginTop:'8px'}}
+        <SettingSection icon={<BellIcon />} tone="success" title="Alert Configurations">
+          <div className="settings-grid two">
+            <FieldBlock label="Alert Threshold">
+              <div className="settings-preset-row">
+                {ALERT_PRESETS.map(preset => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className={`settings-preset ${Math.abs(threshold - preset.value) < 0.01 ? 'active' : ''}`}
+                    onClick={() => setThreshold(preset.value)}
+                  >
+                    {preset.label} <span>{preset.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="settings-range-row">
+                <span>Anomaly Threshold</span>
+                <strong>{threshold.toFixed(2)}</strong>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="0.9"
+                  step="0.05"
+                  value={threshold}
+                  onChange={e => setThreshold(+parseFloat(e.target.value).toFixed(2))}
+                />
+              </div>
+            </FieldBlock>
+
+            <FieldBlock label="Zero-Day Candidate Threshold">
+              <div className="settings-range-card">
+                <div>
+                  <span>Novelty Score</span>
+                  <strong>{zdThreshold.toFixed(2)}</strong>
+                </div>
+                <input
+                  type="range"
+                  min="0.3"
+                  max="0.95"
+                  step="0.05"
+                  value={zdThreshold}
+                  onChange={e => setZdThreshold(+parseFloat(e.target.value).toFixed(2))}
+                />
+              </div>
+            </FieldBlock>
+          </div>
+        </SettingSection>
+
+        <SettingSection icon={<DataIcon />} tone="accent" title="Data Management">
+          <div className="settings-grid two">
+            <FieldBlock label="Raw Flow Retention">
+              <div className="settings-data-card">
+                <strong>Persistent capture database</strong>
+                <span>Raw network flows from live sniffer sessions are stored for system testing and can grow over time.</span>
+              </div>
+            </FieldBlock>
+
+            <FieldBlock label="Maintenance Action">
+              <button
+                className="btn btn-default settings-danger-action"
                 onClick={handleClearFlows}
                 disabled={clearingDB}
               >
-                {clearingDB ? <span className="spinner"/> : '🗑'} Clear Raw Flows Database
+                {clearingDB ? <span className="spinner" /> : 'Clear'} Raw Flows Database
               </button>
-            </div>
+            </FieldBlock>
           </div>
-        </div>
+        </SettingSection>
 
-        {/* Right — thresholds */}
-        <div style={{display:'flex',flexDirection:'column',gap:'14px'}}>
-          <div className="card">
-            <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'16px'}}>
-              Detection Thresholds
+        <SettingSection icon={<PulseIcon />} tone="success" title="System Informations">
+          <div className="settings-grid two">
+            <div className="settings-info-list">
+              <div><span>Version</span><strong>v4.0.0</strong></div>
+              <div><span>System Status</span><strong>{formatStatus(systemStatus?.status)}</strong></div>
+              <div><span>Last Update</span><strong>{systemStatus?.server_time ? new Date(systemStatus.server_time).toLocaleString() : 'Unknown'}</strong></div>
             </div>
-            <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
-              <div>
-                <label>Anomaly Threshold — <span style={{color:'var(--accent)'}}>{threshold}</span></label>
-                <p style={{fontSize:'10px',color:'var(--text-tertiary)',fontFamily:'var(--font-mono)',marginBottom:'8px'}}>
-                  Confidence score above which a flow is flagged as anomalous
-                </p>
-                <input type="range" min="0.1" max="0.9" step="0.05" value={threshold}
-                  onChange={e=>setThreshold(+parseFloat(e.target.value).toFixed(2))}
-                  style={{padding:0,cursor:'pointer',accentColor:'var(--accent)'}} />
+
+            <div className="settings-info-list">
+              <div><span>Database Status</span><strong className="t-success">Connected</strong></div>
+              <div><span>API Status</span><strong className={systemStatus ? 't-success' : 't-warning'}>{systemStatus ? 'Connected' : 'Unknown'}</strong></div>
+              <div><span>Antibody Count</span><strong>{(systemStatus?.antibody_count ?? 0).toLocaleString()}</strong></div>
+            </div>
+
+            {modelInfo && modelInfo[activeModel] && (
+              <div className="settings-model-info">
+                {Object.entries(modelInfo[activeModel]).slice(0, 6).map(([key, value]) => (
+                  <div key={key}>
+                    <span>{key}</span>
+                    <strong>{String(value)}</strong>
+                  </div>
+                ))}
               </div>
-              <div>
-                <label>Zero-Day Candidate Threshold — <span style={{color:'var(--iris)'}}>{zdThreshold}</span></label>
-                <p style={{fontSize:'10px',color:'var(--text-tertiary)',fontFamily:'var(--font-mono)',marginBottom:'8px'}}>
-                  Novelty score above which an anomaly is labelled "Zero-Day Candidate"
-                </p>
-                <input type="range" min="0.3" max="0.95" step="0.05" value={zdThreshold}
-                  onChange={e=>setZdThreshold(+parseFloat(e.target.value).toFixed(2))}
-                  style={{padding:0,cursor:'pointer',accentColor:'var(--iris)'}} />
-              </div>
-            </div>
+            )}
           </div>
+        </SettingSection>
 
-          <div className="card" style={{background:'var(--bg-overlay)',borderStyle:'dashed'}}>
-            <div style={{fontSize:'11px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',lineHeight:'1.7'}}>
-              <span style={{color:'var(--warning)',fontWeight:600}}>⚠ Note:</span> Changing the active model only takes effect for new detections.
-              Already-stored alerts are not re-evaluated. Re-train after switching models
-              to ensure the Self profile matches the selected algorithm.
-            </div>
-          </div>
-
-          {error && <div style={{background:'var(--danger-subtle)',border:'1px solid var(--danger-border)',color:'var(--danger)',padding:'10px 14px',borderRadius:'var(--radius)',fontSize:'12px',fontFamily:'var(--font-mono)'}}>⚠ {error}</div>}
-          {saved  && <div style={{background:'var(--success-subtle)',border:'1px solid var(--success-border)',color:'var(--success)',padding:'10px 14px',borderRadius:'var(--radius)',fontSize:'12px',fontFamily:'var(--font-mono)'}}>✓ Settings saved</div>}
-
-          <button className="btn btn-primary" onClick={handleSave} style={{width:'100%',justifyContent:'center',padding:'10px'}}>
-            Save Settings
-          </button>
+        <div className="settings-note">
+          Changing the active model only takes effect for new detections. Already-stored alerts are not re-evaluated.
         </div>
       </div>
     </div>

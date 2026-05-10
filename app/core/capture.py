@@ -36,9 +36,6 @@ scaler.transform() works without any remapping.
 import time
 import threading
 import statistics
-import numpy as np
-import pandas as pd
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 import logging
@@ -519,7 +516,6 @@ class PacketSniffer:
 # ════════════════════════════════════════════════════════════
 
 if __name__ == '__main__':
-    import json
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(message)s')
 

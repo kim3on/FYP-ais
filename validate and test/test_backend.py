@@ -176,11 +176,14 @@ def test_no_inf_nan_after_clean():
     assert not np.any(np.isinf(X_normal)), "Inf found in output"
 
 def test_normalised_to_0_1():
+    """RobustScaler output is centred around 0, not clipped to [0,1].
+    We verify the data is finite and has reasonable spread instead."""
     csv = _make_cicids_csv(80, 20)
-    prep = CICIDSPreprocessor()
+    prep = CICIDSPreprocessor(n_pca_components=None)
     X_normal, _, _ = prep.fit_transform(csv)
-    assert X_normal.min() >= -1e-6
-    assert X_normal.max() <= 1.0 + 1e-6
+    assert np.isfinite(X_normal).all(), "Non-finite values found after scaling"
+    # RobustScaler centres at median; values must not ALL be zero (i.e. scaler is active)
+    assert X_normal.std() > 0, "Scaler produced all-zero variance — scaler not applied"
 
 def test_duplicate_col_removed():
     """'Fwd Header Length.1' duplicate should be removed."""
@@ -224,7 +227,8 @@ def test_inference_alignment():
     prep = CICIDSPreprocessor()
     prep.fit_transform(csv_train)
     X_new, _ = prep.transform(csv_test)
-    assert X_new.shape[1] == len(prep.feature_columns_)
+    expected_cols = prep.pca_.n_components_ if prep.pca_ is not None else len(prep.feature_columns_)
+    assert X_new.shape[1] == expected_cols
 
 def test_persistence():
     with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as tmp:
@@ -251,7 +255,7 @@ def test_benign_only_returns_no_normal_in_X_normal():
 def test_feature_count_reasonable():
     """CIC-IDS-2017 should produce ~75 numeric features after cleaning."""
     csv = _make_cicids_csv(40, 10)
-    prep = CICIDSPreprocessor()
+    prep = CICIDSPreprocessor(n_pca_components=None)
     prep.fit_transform(csv)
     n = len(prep.feature_columns_)
     assert 50 <= n <= 90, f"Unexpected feature count: {n}"
@@ -579,7 +583,9 @@ def test_nsa_detector_primary_classification():
     X_self_10d = rng.uniform(0.3, 0.6, (500, n_feat)).astype(np.float32)
     X_atk_10d  = rng.uniform(0.65, 0.80, (200, n_feat)).astype(np.float32)
 
-    nsa_10d = NegativeSelectionDetector(r=0.15, r_s=0.02, max_detectors=500, max_attempts=5000)
+    # auto_threshold=False keeps the explicit r/r_s in this controlled test
+    nsa_10d = NegativeSelectionDetector(r=0.15, r_s=0.02, max_detectors=500,
+                                        max_attempts=5000, auto_threshold=False)
     nsa_10d.fit(X_self_10d)
 
     det_matched, _ = nsa_10d._check_detector_match(X_atk_10d)

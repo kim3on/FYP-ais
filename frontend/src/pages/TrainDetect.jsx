@@ -7,6 +7,9 @@ import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
 import './TrainDetect.css';
+import shieldIcon from '../assets/shield.svg';
+import chartArrowRiseIcon from '../assets/chart-arrow-rise.svg';
+import databaseIcon from '../assets/database.svg';
 
 // ── Shared log box component ───────────────────────────────────
 function LogBox({ lines, height = '220px' }) {
@@ -56,6 +59,7 @@ function MetricsGrid({ result }) {
   const rows = [
     ['Accuracy', result.accuracy], ['Precision', result.precision],
     ['Recall', result.recall],     ['F1 Score', result.f1],
+    ['False Pos. Rate', result.false_positive_rate],
   ].filter(([, v]) => v != null);
   if (!rows.length) return null;
   return (
@@ -70,6 +74,10 @@ function MetricsGrid({ result }) {
   );
 }
 
+function SummaryIcon({ src, alt, tone }) {
+  return <img className={`td-summary-icon ${tone || ''}`} src={src} alt={alt} />;
+}
+
 // ══════════════════════════════════════════════════════════════
 //  TRAINING TAB
 // ══════════════════════════════════════════════════════════════
@@ -80,7 +88,7 @@ function TrainingTab() {
     rRadius, setR,
     rsRadius, setRS,
     trainLogs: logs, setTrainLogs: setLogs,
-    trainResult: result, setTrainResult: setResult,
+    setTrainResult: setResult,
     refreshStatus
   } = useApp();
 
@@ -204,20 +212,7 @@ function TrainingTab() {
             <div className="td-section-label">Training Log</div>
             <LogBox lines={logs} height="250px" />
           </div>
-          {result && (
-            <div className="card">
-              <div className="td-section-label">Training Result</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                {[['Detectors', result.nsa_summary?.mature_detectors ?? '—'], ['Self Samples', result.nsa_summary?.n_self_samples ?? '—']].map(([k, v]) => (
-                  <div key={k} style={{ background: 'var(--bg-overlay)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
-                    <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{k}</div>
-                    <div style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{typeof v === 'number' ? v.toLocaleString() : v}</div>
-                  </div>
-                ))}
-              </div>
-              <MetricsGrid result={result.nsa_eval} />
-            </div>
-          )}
+          {/* Training result moved to top */}
         </div>
       </div>
     </div>
@@ -350,6 +345,90 @@ function DetectionTab() {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  GLOBAL TRAINING RESULT
+// ══════════════════════════════════════════════════════════════
+function GlobalTrainingResult() {
+  const { trainResult, trainFile } = useApp();
+  if (!trainResult) return null;
+
+  const detectors = trainResult.nsa_summary?.mature_detectors ?? 0;
+  const accuracy = trainResult.nsa_eval?.accuracy != null ? (trainResult.nsa_eval.accuracy * 100).toFixed(1) + '%' : '—';
+  const samples = trainResult.nsa_summary?.n_self_samples ?? 0;
+  
+  let datasetName;
+  if (trainFile?.name) {
+    datasetName = trainFile.name.replace(/\.[^/.]+$/, "");
+  } else if (trainResult.nsa_summary?.dataset_name) {
+    datasetName = trainResult.nsa_summary.dataset_name;
+  } else {
+    datasetName = 'Loaded Model';
+  }
+
+  const eval_ = trainResult.nsa_eval || {};
+  const detailMetrics = [
+    ['Precision',     eval_.precision     != null ? (eval_.precision     * 100).toFixed(1) + '%' : '—', 'var(--success)'],
+    ['Recall',        eval_.recall        != null ? (eval_.recall        * 100).toFixed(1) + '%' : '—', 'var(--success)'],
+    ['F1 Score',      eval_.f1            != null ? (eval_.f1            * 100).toFixed(1) + '%' : '—', 'var(--success)'],
+    ['False Pos. Rate', eval_.false_positive_rate != null ? (eval_.false_positive_rate * 100).toFixed(1) + '%' : '—', 'var(--warning)'],
+  ].filter(([, v]) => v !== '—');
+
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      {/* ── 3 big summary cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '12px' }}>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
+            <SummaryIcon src={shieldIcon} alt="" tone="accent" /> Active Antibodies
+          </div>
+          <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', fontFamily: "'JetBrains Mono', monospace" }}>
+            {detectors.toLocaleString()}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>
+            Valid Detectors Stored
+          </div>
+        </div>
+
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
+            <SummaryIcon src={chartArrowRiseIcon} alt="" tone="success" /> Training Accuracy
+          </div>
+          <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', fontFamily: "'JetBrains Mono', monospace" }}>
+            {accuracy}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>
+            Baseline vs Validation Set
+          </div>
+        </div>
+
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
+            <SummaryIcon src={databaseIcon} alt="" tone="iris" /> Current Dataset
+          </div>
+          <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'JetBrains Mono', monospace" }}>
+            {datasetName}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>
+            {samples.toLocaleString()} Records Loaded
+          </div>
+        </div>
+      </div>
+
+      {/* ── Compact detail metrics ── */}
+      {detailMetrics.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '8px' }}>
+          {detailMetrics.map(([label, val, color]) => (
+            <div key={label} style={{ background: 'var(--bg-overlay)', borderRadius: 'var(--radius)', padding: '6px 12px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '8px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '2px' }}>{label}</div>
+              <div style={{ fontSize: '11px', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color }}>{typeof val === 'number' ? val.toLocaleString() : val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 //  MAIN PAGE — Tab switcher
 // ══════════════════════════════════════════════════════════════
 export default function TrainDetect() {
@@ -360,6 +439,8 @@ export default function TrainDetect() {
         <h1 className="page-title">Train & Detect</h1>
         <p className="page-subtitle">Train the NSA Self profile · Run batch anomaly detection</p>
       </div>
+
+      <GlobalTrainingResult />
 
       {/* Tab bar */}
       <div className="td-tabs">

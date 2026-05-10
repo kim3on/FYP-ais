@@ -76,17 +76,21 @@ class NegativeSelectionDetector:
 
     def __init__(
         self,
-        r: float = 0.3,
+        r: float = 0.15,
         r_s: float | None = None,
-        max_detectors: int = 500,
-        max_attempts: int = 10_000,
+        max_detectors: int = 1000,
+        max_attempts: int = 30_000,
         random_state: int = 42,
+        confidence_threshold: float = 0.05,
+        auto_threshold: bool = True,
     ):
         self.r = r
         self.r_s = r_s if r_s is not None else min(r * 0.1, 0.05)
         self.max_detectors = max_detectors
         self.max_attempts = max_attempts
         self.random_state = random_state
+        self.confidence_threshold = confidence_threshold
+        self.auto_threshold = auto_threshold
 
         # Fitted state
         self.detectors_: np.ndarray | None = None
@@ -125,6 +129,30 @@ class NegativeSelectionDetector:
         self._ref_sq_ = (ref * ref).sum(axis=1)          # (n_ref,)
         n_ref = len(ref)
 
+        # ── Dynamic threshold computation ─────────────────────────────
+        # Compute r and r_s from the actual benign data distribution in PCA space.
+        # This avoids hard-coded [0,1] assumptions that break after RobustScaler+PCA.
+        if self.auto_threshold:
+            n_subset = min(n_ref, 2000)
+            idx_subset = rng.choice(n_ref, size=n_subset, replace=False) if n_ref > 2000 else np.arange(n_ref)
+            ref_subset = ref[idx_subset]
+            ref_subset_sq = self._ref_sq_[idx_subset]
+
+            dot_matrix = ref_subset @ ref.T
+            sq_dists = ref_subset_sq[:, np.newaxis] + self._ref_sq_[np.newaxis, :] - 2.0 * dot_matrix
+            np.clip(sq_dists, 0, None, out=sq_dists)
+            dist_matrix = np.sqrt(sq_dists) / scale
+
+            # Calculate nearest neighbor distances (ignore self-distance 0)
+            sorted_dists = np.sort(dist_matrix, axis=1)
+            nn_dists = sorted_dists[:, 1] if sorted_dists.shape[1] > 1 else sorted_dists[:, 0]
+
+            # Dynamic r (Self-Gap Threshold): 99.9th percentile of all pairwise distances
+            self.r = max(float(np.percentile(dist_matrix, 99.9)), 0.05)
+            
+            # Dynamic r_s (Self-Tolerance): 99.0th percentile of nearest-neighbor distances
+            self.r_s = max(float(np.percentile(nn_dists, 99.0)), 0.01)
+
         # ── V-Detector generation ─────────────────────────────────────
         # r_s is in normalised distance space; convert to squared raw:
         #   norm_dist = sqrt(raw_sq) / sqrt(d)
@@ -149,16 +177,15 @@ class NegativeSelectionDetector:
 
             if len(detectors) < (self.max_detectors // 2):
                 # Phase 1: Smart sampling via KMeans centroids + large noise
-                # Replaces uniform random to avoid the curse of dimensionality
+                # Mutation in actual data-space — no [0,1] clip (breaks after PCA)
                 centroid = centroids[rng.integers(len(centroids))]
                 mutation = rng.normal(0, self.r * 3.0, n_features).astype(np.float32)
-                candidate = np.clip(centroid + mutation, 0, 1)
+                candidate = centroid + mutation
             else:
                 # Phase 2: Boundary mutation — push self samples outward
-                # Sigma = r * 1.5 pushes candidates ~1 radius beyond self-boundary
                 base = ref[rng.integers(n_ref)]
                 mutation = rng.normal(0, self.r * 1.5, n_features).astype(np.float32)
-                candidate = np.clip(base + mutation, 0, 1)
+                candidate = base + mutation
 
             # Distance to nearest self (squared, raw)
             c_sq = float((candidate * candidate).sum())
@@ -224,6 +251,9 @@ class NegativeSelectionDetector:
             "det_radius_min": float(min(radii)) if radii else 0.0,
             "det_radius_max": float(max(radii)) if radii else 0.0,
             "det_radius_mean": float(np.mean(radii)) if radii else 0.0,
+            "auto_threshold": self.auto_threshold,
+            "r_fitted": round(self.r, 6),
+            "r_s_fitted": round(self.r_s, 6),
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
         return self
@@ -267,6 +297,7 @@ class NegativeSelectionDetector:
         """
         self._check_fitted()
         det_matched, det_scores = self._check_detector_match(X)
+        det_matched = det_matched & (det_scores >= getattr(self, "confidence_threshold", 0.0))
         dist_to_self = self._min_dist_to_self(X)
         self_gap = dist_to_self > self.r
 
@@ -295,6 +326,7 @@ class NegativeSelectionDetector:
         """
         self._check_fitted()
         det_matched, det_scores = self._check_detector_match(X)
+        det_matched = det_matched & (det_scores >= getattr(self, "confidence_threshold", 0.0))
         dist_to_self = self._min_dist_to_self(X)
         self_gap = dist_to_self > self.r
 

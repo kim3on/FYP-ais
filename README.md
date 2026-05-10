@@ -6,10 +6,22 @@
 
 ## 🚀 Recent System Updates (May 2026)
 
-- **Frontend UI/UX Overhaul:** Transitioned to a high-contrast "Cyber-Defense" aesthetic using a refined Rosé Pine theme. Enhanced forensic data visualization and real-time status tracking.
-- **Robust AIS Matching:** Refactored the Negative Selection Algorithm (NSA) to use a True V-Detector architecture. Detects known anomalies via variable-radius mature detectors, while using the "Self-gap" fallback mechanism for far-out zero-day spaces.
-- **Leakage-Free ML Pipeline:** Refactored the preprocessing and training workflow to eliminate data leakage. The feature scaler is now fitted strictly on training data, ensuring statistically sound benchmarks against Isolation Forest.
-- **Code Integrity:** Resolved 49 frontend linting issues and optimized React hook stability.
+### May 10 Update
+- **Dashboard UI Refresh:** Reworked the dashboard into focused metric cards for total packets, anomalies detected, active antibodies, and zero-day candidates, with live severity indicators.
+- **Accessibility & Help Centre:** Added a dedicated Accessibility page with getting-started guidance, FAQ, glossary, troubleshooting notes, and WCAG-oriented usability information.
+- **Settings Experience:** Refined the settings interface for active model selection, alert threshold configuration, raw-flow cleanup, and system/model visibility.
+
+### May 6 Security & ML Update
+- **JWT Authentication:** Replaced demo tokens with signed JWT authentication. Passwords are stored as bcrypt hashes, and non-health API routes now require authenticated access.
+- **Secured WebSocket Access:** Live WebSocket connections now require a valid token instead of exposing alert snapshots publicly.
+- **Analytical Alert Export:** Added a backend-generated alert CSV export with attack families, severity ranks, repeat counts, risk scores, review status, and recommended analyst actions.
+- **PCA-Safe NSA Geometry:** Updated the preprocessing/model path to use RobustScaler + PCA whitening, dynamic NSA thresholds, and detector generation in the actual PCA feature space instead of assuming `[0, 1]` bounds.
+- **False Positive Rate Visibility:** Exposed FPR in training/detection result views to make model evaluation more useful for FYP analysis.
+
+### Earlier May Update
+- **True V-Detector NSA:** Refactored the Negative Selection Algorithm to use variable-radius mature detectors with self-gap fallback for novel anomaly space.
+- **Leakage-Free ML Pipeline:** The feature transformer is fitted strictly on training data before held-out evaluation, reducing test-set leakage.
+- **Frontend UI/UX Overhaul:** Transitioned to a high-contrast cyber-defense interface with improved forensic visualization and live status tracking.
 
 ## Architecture Overview
 
@@ -28,6 +40,7 @@ ais-backend/
 │   └── artefacts/       # Trained Models & Preprocessor States
 │
 ├── frontend/            # React (Vite) Dashboard
+│   ├── src/pages/       # Dashboard, Training, Detection, Alerts, Settings, Accessibility
 │   ├── src/hooks/       # Optimized Custom Hooks (useApp, useAuth)
 │   └── src/styles/      # Modern Cyber-Defense Global Styles
 │
@@ -95,19 +108,32 @@ The current implementation uses a **V-Detector Inference Engine**:
 
 ## 📋 Technical Documentation
 Detailed technical analyses are available in the project root:
-- `analysis_ui_ux.md`: Design philosophy and frontend audit.
-- `analysis_ais_logic.md`: Immunological matching and forensic scoring details.
-- `analysis_ml_validation.md`: Statistical integrity and leakage prevention report.
-- `analysis_security_audit.md`: **[CRITICAL]** Brutally critical system security audit.
+- `analysis/analysis_ui_ux.md`: Design philosophy and frontend audit.
+- `analysis/analysis_ais_logic.md`: Immunological matching and forensic scoring details.
+- `analysis/analysis_ml_validation.md`: Statistical integrity and leakage prevention report.
+- `analysis/analysis_security_audit.md`: Security audit baseline and original risk register.
+- `analysis/fix 6 may/auth fix.md`: JWT, bcrypt, route protection, and WebSocket auth plan/summary.
+- `analysis/fix 6 may/csv_analysis.md`: Analytical CSV export design.
+- `analysis/fix 6 may/threshold calibration and correct PCA-space detector geometry.md`: RobustScaler + PCA + dynamic NSA threshold rationale.
+- `analysis/fix 10 may/implementation_plan ui dashboard.md`: Dashboard metric card redesign plan.
+- `analysis/fix 10 may/implementation_plan accesibility.md`: Accessibility and help-centre page plan.
+
 ## API Reference
 
 ### Authentication
 ```
 POST /api/auth/login
 Body: { "username": "admin", "password": "password" }
+Returns: { success, username, role, token }
 ```
 
-Default accounts: `admin / password` · `analyst / analyst123`
+Default seeded accounts: `admin / password` · `analyst / analyst123`
+
+All non-health API calls should include:
+
+```
+Authorization: Bearer <jwt-token>
+```
 
 ### Training
 ```
@@ -148,7 +174,16 @@ WS   /ws/live             → WebSocket push (snapshot + per-flow updates)
 GET   /api/alerts              → list alerts (?severity=critical, ?limit=100)
 GET   /api/alerts/{id}         → single alert detail
 PATCH /api/alerts/{id}/fp      → mark as false positive
+DELETE /api/alerts             → clear stored alerts
+
+GET   /api/alerts/export.csv   → analytical CSV export
+  Query params: from, to, severity, attack_type, include_false_positive, zero_day_only
 ```
+
+The CSV export is generated from the SQLite alert database, not only the visible
+frontend table. It includes derived fields such as `attack_family`,
+`severity_rank`, `risk_score`, repeat counts, `recommended_action`, and
+`analysis_note` for FYP reporting and analyst review.
 
 ### Dashboard & Settings
 ```
@@ -165,11 +200,23 @@ GET  /health                   → { status: "ok", version: "4.0.0" }
 
 | Parameter        | Default | Description |
 |------------------|---------|-------------|
-| `r`              | 0.5     | Detector activation radius. Smaller = more precise, fewer FPs. |
-| `max_detectors`  | 500     | Max mature antibodies. More = better coverage, slower training. |
-| `max_attempts`   | 10,000  | Max random candidates tried during training. |
+| `r`              | Auto-calibrated by default | Self-gap threshold. Derived from benign PCA-space distance distribution when `auto_threshold=True`. |
+| `r_s`            | Auto-calibrated by default | Self-tolerance margin for negative selection. Derived from benign nearest-neighbour distances when `auto_threshold=True`. |
+| `max_detectors`  | 1,000   | Max mature antibodies. More = better coverage, slower training. |
+| `max_attempts`   | 30,000  | Max random candidates tried during training. |
 | `contamination`  | 0.05    | IsoForest: expected fraction of attacks in training data. |
 | `test_size`      | 0.2     | Fraction held out for test-set evaluation. |
+| `n_pca_components` | 0.95 | PCA target variance/components. Default keeps enough components for 95% explained variance. |
+
+Current preprocessing flow:
+
+```
+Raw CIC-IDS-2017 features
+→ clean Inf / NaN / duplicate columns
+→ RobustScaler
+→ PCA(whiten=True)
+→ NSA / Isolation Forest
+```
 
 ---
 
@@ -210,13 +257,20 @@ exported from CICFlowMeter as CSV. Key properties:
 
 ## 🔒 Security Status
 
-**WARNING:** A comprehensive security audit (May 2026) has identified several **CRITICAL** vulnerabilities in the authentication and WebSocket layers. While the detection engine is robust, the application itself is currently considered a "Security Theatre" implementation and **must not be deployed in production** without implementing the recommendations in `analysis_security_audit.md`.
+The May 6 update addresses the original critical demo-auth findings:
 
-**Identified Issues:**
-- Predictable demo tokens.
-- Unauthenticated WebSockets.
-- Cleartext password comparison.
-- Static radius evasion vectors.
+- Demo tokens were replaced with signed JWTs.
+- Default seeded passwords are hashed with bcrypt.
+- Training, detection, alerts, capture, dashboard stats/settings, and firewall routes are protected by authentication dependencies.
+- Live WebSocket access requires a token.
+
+Remaining deployment hardening before public production use:
+
+- Move `SECRET_KEY` and environment-specific settings out of source code.
+- Add role-specific authorization for destructive admin actions.
+- Restrict CORS origins for deployed environments.
+- Replace SQLite with a managed database for multi-user/cloud deployment.
+- Move long-running training/detection jobs to a durable job queue if used beyond demo scale.
 
 ---
 

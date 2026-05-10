@@ -22,7 +22,13 @@ export function useWebSocket(url, onMessage, enabled = true) {
     // In prod same origin is used
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host     = window.location.host;
-    const fullUrl  = url.startsWith('ws') ? url : `${protocol}//${host}${url}`;
+    
+    // Add token for authentication (FastAPI /ws/live requires it in query string)
+    const token = localStorage.getItem('ais_token');
+    const separator = url.includes('?') ? '&' : '?';
+    const urlWithToken = token ? `${url}${separator}token=${token}` : url;
+    
+    const fullUrl  = url.startsWith('ws') ? url : `${protocol}//${host}${urlWithToken}`;
 
     const ws = new WebSocket(fullUrl);
 

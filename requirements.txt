@@ -17,3 +17,5 @@ pyarrow>=14.0.0           # Parquet support for CIC-IDS-2017 datasets
 scapy>=2.5.0
 psutil>=5.9.0             # network interface enumeration
 SQLAlchemy
+PyJWT>=2.8.0
+bcrypt>=4.0.0

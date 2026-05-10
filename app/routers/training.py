@@ -10,13 +10,17 @@ import json
 import os
 import traceback
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
-from datetime import datetime
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, Depends
 
 from app.core.pipeline import TrainingPipeline, RESULTS_PATH
 from app.state import _state
+from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/api/train", tags=["training"])
+router = APIRouter(
+    prefix="/api/train",
+    tags=["training"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post("")
@@ -25,10 +29,11 @@ async def train(
     file: UploadFile = File(...),
     r:              float = 0.3,
     r_s:            float | None = None,
-    max_detectors:  int   = 500,
-    max_attempts:   int   = 10_000,
+    max_detectors:  int   = 1000,
+    max_attempts:   int   = 30_000,
     contamination:  float = 0.05,
     test_size:      float = 0.2,
+    n_pca_components: int | None = 25,
 ):
     """
     Upload a training dataset (CSV or Parquet) and start the training pipeline.
@@ -64,6 +69,7 @@ async def train(
     _max_attempts  = int(max_attempts)
     _contamination = float(contamination)
     _test_size     = float(test_size)
+    _n_pca         = int(n_pca_components) if n_pca_components is not None else None
 
     def run_training():
         try:
@@ -74,6 +80,7 @@ async def train(
                 max_attempts=_max_attempts,
                 contamination=_contamination,
                 test_size=_test_size,
+                n_pca_components=_n_pca,
             )
             result = pipeline.run(dataset_bytes, log_callback=log_cb, filename=upload_filename)
             _state["last_result"] = result
@@ -94,6 +101,7 @@ async def train(
             "max_attempts":  _max_attempts,
             "contamination": _contamination,
             "test_size":     _test_size,
+            "n_pca_components": _n_pca,
         },
     }
 

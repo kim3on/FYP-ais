@@ -16,8 +16,13 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.models.db_models import BlockedIPDB
+from app.routers.auth import get_current_user
 
-router = APIRouter(tags=["firewall"])
+router = APIRouter(
+    prefix="/api/firewall",
+    tags=["firewall"],
+    dependencies=[Depends(get_current_user)]
+)
 
 # ── In-memory blocked IP registry ────────────────────────────────────
 _blocked_ips: dict = {}   # { ip: { blocked_at, reason, rule_name } }
@@ -46,7 +51,7 @@ def _sanitise_ip(ip: str) -> str:
 #  REST ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════
 
-@router.post("/api/firewall/block")
+@router.post("/block")
 async def block_ip(req: BlockRequest, db: Session = Depends(get_db)):
     """
     Block an IP address by creating an inbound Windows Firewall rule.
@@ -106,7 +111,7 @@ async def block_ip(req: BlockRequest, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/api/firewall/unblock")
+@router.post("/unblock")
 async def unblock_ip(req: UnblockRequest, db: Session = Depends(get_db)):
     """
     Remove the Windows Firewall block rule for an IP address.
@@ -145,7 +150,7 @@ async def unblock_ip(req: UnblockRequest, db: Session = Depends(get_db)):
     return {"message": f"Unblocked {ip}", "ip": ip}
 
 
-@router.get("/api/firewall/blocked")
+@router.get("/blocked")
 async def list_blocked(db: Session = Depends(get_db)):
     """Return all currently blocked IPs from the database."""
     blocked = db.query(BlockedIPDB).all()

@@ -134,7 +134,7 @@ export default function Detection() {
               <div className="card">
                 <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'12px'}}>Model Metrics</div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
-                  {[['Accuracy',result.accuracy],['Precision',result.precision],['Recall',result.recall],['F1',result.f1]].map(([k,v])=>(
+                  {[['Accuracy',result.accuracy],['Precision',result.precision],['Recall',result.recall],['F1',result.f1],['FPR',result.false_positive_rate]].map(([k,v])=>(
                     <div key={k} style={{background:'var(--bg-overlay)',borderRadius:'var(--radius)',padding:'10px 12px'}}>
                       <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',marginBottom:'4px'}}>{k}</div>
                       <div style={{fontSize:'20px',fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--success)'}}>{v!=null?`${(v*100).toFixed(1)}%`:'—'}</div>

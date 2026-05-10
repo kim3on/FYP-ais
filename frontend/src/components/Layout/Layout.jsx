@@ -1,4 +1,5 @@
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useApp } from '../../hooks/useApp';
 import Sidebar from './Sidebar';
@@ -7,8 +8,13 @@ import './Layout.css';
 export default function Layout() {
   const { isAuthenticated } = useAuth();
   const { systemStatus } = useApp();
-  
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isAuthenticated) navigate('/login', { replace: true });
+  }, [isAuthenticated, navigate]);
+
+  if (!isAuthenticated) return null;
 
   const isReady = systemStatus?.models_ready;
 

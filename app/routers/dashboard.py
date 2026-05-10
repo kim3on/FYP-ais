@@ -11,12 +11,13 @@ GET   /                      — HTML landing page with API overview
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from app.core.pipeline import load_nsa, load_iso, models_ready
 from app.schemas import SettingsUpdate
 from app.state import _state
+from app.routers.auth import get_current_user
 
 router = APIRouter(tags=["dashboard"])
 
@@ -26,7 +27,7 @@ router = APIRouter(tags=["dashboard"])
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/api/system/status")
-async def system_status():
+async def system_status(user=Depends(get_current_user)):
     """System health and model readiness."""
     ready = models_ready()
     nsa   = load_nsa()
@@ -46,20 +47,29 @@ async def system_status():
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/api/dashboard/stats")
-async def dashboard_stats():
-    """Aggregate counts for the four stat cards on the dashboard."""
-    alerts          = _state["alerts"]
-    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-    for a in alerts:
-        sev = a.get("severity", "low")
-        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+async def dashboard_stats(user=Depends(get_current_user)):
+    """Aggregate counts for the stat cards — reads from persistent DB."""
+    from app.core.database import SessionLocal
+    from app.models.db_models import AlertDB
 
-    nsa       = load_nsa()
+    db = SessionLocal()
+    try:
+        all_alerts = db.query(AlertDB).all()
+        total_anomalies = len(all_alerts)
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for a in all_alerts:
+            sev = (a.severity or "low").lower()
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+    finally:
+        db.close()
+
+    nsa        = load_nsa()
     antibodies = nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0
 
     return {
         "total_packets":     _state["packet_count"],
-        "anomalies_total":   _state["anomaly_count"],
+        "anomalies_total":   total_anomalies,
         "critical_alerts":   severity_counts["critical"],
         "active_antibodies": antibodies,
         "severity_counts":   severity_counts,
@@ -72,7 +82,7 @@ async def dashboard_stats():
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/api/model/summary")
-async def model_summary():
+async def model_summary(user=Depends(get_current_user)):
     """Return metadata for both trained models."""
     nsa = load_nsa()
     iso = load_iso()
@@ -84,7 +94,7 @@ async def model_summary():
 
 
 @router.patch("/api/settings")
-async def update_settings(settings: SettingsUpdate):
+async def update_settings(settings: SettingsUpdate, user=Depends(get_current_user)):
     """Update runtime settings (active model, alert threshold)."""
     if settings.active_model in ("nsa", "isolation_forest"):
         _state["active_model"] = settings.active_model

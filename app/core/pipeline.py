@@ -13,12 +13,11 @@ This module is called by the FastAPI /train endpoint.
 
 import os
 import numpy as np
-import pandas as pd
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 
 from app.core.preprocessor import CICIDSPreprocessor
-from app.core.evaluator import evaluate_model, compare_models, EvaluationResult
+from app.core.evaluator import evaluate_model, compare_models
 from app.models.nsa import NegativeSelectionDetector
 from app.models.isolation_forest import IsolationForestDetector
 
@@ -60,6 +59,7 @@ class TrainingPipeline:
         contamination: float = 0.05,
         test_size: float = 0.2,
         random_state: int = 42,
+        n_pca_components: float | int | None = 0.95,
     ):
         self.r = r
         self.r_s = r_s
@@ -68,6 +68,7 @@ class TrainingPipeline:
         self.contamination = contamination
         self.test_size = test_size
         self.random_state = random_state
+        self.n_pca_components = n_pca_components
 
         os.makedirs(ARTEFACT_DIR, exist_ok=True)
 
@@ -95,7 +96,7 @@ class TrainingPipeline:
 
         # ── 1. INITIAL LOAD ──────────────────────────────────────────
         log("[SYSTEM] Initiating training sequence...")
-        preprocessor = CICIDSPreprocessor()
+        preprocessor = CICIDSPreprocessor(n_pca_components=self.n_pca_components)
 
         log(f"[INFO] Loading and parsing dataset{' (' + filename + ')' if filename else ''}...")
         df_raw = preprocessor._load(dataset_source, filename=filename)

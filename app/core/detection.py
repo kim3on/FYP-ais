@@ -17,8 +17,6 @@ import uuid
 
 from app.core.preprocessor import CICIDSPreprocessor
 from app.core.evaluator import severity_from_score
-from app.models.nsa import NegativeSelectionDetector
-from app.models.isolation_forest import IsolationForestDetector
 
 
 @dataclass
@@ -144,7 +142,6 @@ class DetectionEngine:
         for i in anomaly_indices:
             row = df.iloc[i] if i < len(df) else {}
             score = float(scores[i])
-            min_dist = float(min_dists[i]) if min_dists is not None else 0.0
             severity = severity_from_score(score)
 
             # Try to read real metadata from the dataframe row.
