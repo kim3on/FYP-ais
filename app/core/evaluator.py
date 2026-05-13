@@ -7,8 +7,9 @@ enabling the comparative analysis described in the FYP report (Stage 5).
 Metrics computed:
   - Accuracy, Precision, Recall, F1-Score (binary)
   - Confusion matrix
-  - Detection rate per attack category
-  - False positive rate
+  - Detection rate / TPR, FNR, FPR
+  - Threshold trade-off analysis for labelled post-run verification
+  - Silhouette score for predicted normal/anomaly groups
 """
 
 import numpy as np
@@ -18,10 +19,32 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     confusion_matrix,
+    silhouette_score,
 )
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 import pandas as pd
+
+METRIC_EXPLANATIONS = {
+    "tp": "True Positives: attack flows correctly flagged as anomalies.",
+    "tn": "True Negatives: benign flows correctly passed as normal.",
+    "fp": "False Positives: benign flows incorrectly flagged as anomalies.",
+    "fn": "False Negatives: attack flows missed as normal.",
+    "recall": "Recall / Detection Rate / TPR: percentage of real attacks caught. Main IDS metric.",
+    "false_negative_rate": "FNR: percentage of real attacks missed. Lower is better.",
+    "false_positive_rate": "FPR: percentage of benign flows incorrectly alerted. Lower is better.",
+    "precision": "Precision: percentage of alerts that are true attacks.",
+    "f1": "F1-score: harmonic mean of precision and recall.",
+    "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
+    "silhouette_score": (
+        "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. "
+        "It does not prove attack-detection correctness."
+    ),
+    "self_intrusion_rate": (
+        "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. "
+        "AIS autoimmunity check; lower is better."
+    ),
+}
 
 
 @dataclass
@@ -37,18 +60,22 @@ class EvaluationResult:
     fp: int  # false positives (normal flagged as attack)
     fn: int  # false negatives (attacks missed)
     false_positive_rate: float
+    false_negative_rate: float
     detection_rate:      float
+    true_positive_rate:  float
     per_category: dict = field(default_factory=dict)
     n_samples:   int = 0
     n_attacks:   int = 0
     n_normal:    int = 0
     evaluated_at: str = ""
+    metric_explanations: dict = field(default_factory=lambda: METRIC_EXPLANATIONS)
 
     def to_dict(self) -> dict:
         d = asdict(self)
         # Round floats for JSON neatness
         for k in ("accuracy", "precision", "recall", "f1",
-                  "false_positive_rate", "detection_rate"):
+                  "false_positive_rate", "false_negative_rate",
+                  "detection_rate", "true_positive_rate"):
             d[k] = round(d[k], 4)
         return d
 
@@ -83,8 +110,9 @@ def evaluate_model(
     n_attacks = int(y_true.sum())
     n_normal  = int(len(y_true) - n_attacks)
 
-    fpr = round(fp / (fp + tn), 4) if (fp + tn) > 0 else 0.0
-    dr  = round(tp / (tp + fn), 4) if (tp + fn) > 0 else 0.0
+    fpr = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    fnr = float(fn / (tp + fn)) if (tp + fn) > 0 else 0.0
+    dr  = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
 
     # Per-category detection rates
     per_category = {}
@@ -115,7 +143,9 @@ def evaluate_model(
         f1=f1,
         tp=tp, tn=tn, fp=fp, fn=fn,
         false_positive_rate=fpr,
+        false_negative_rate=fnr,
         detection_rate=dr,
+        true_positive_rate=dr,
         per_category=per_category,
         n_samples=len(y_true),
         n_attacks=n_attacks,
@@ -135,7 +165,8 @@ def compare_models(
         "metrics": {},
     }
     for metric in ("accuracy", "precision", "recall", "f1",
-                   "false_positive_rate", "detection_rate"):
+                   "false_positive_rate", "false_negative_rate",
+                   "detection_rate", "true_positive_rate"):
         comparison["metrics"][metric] = {
             r.model_name: getattr(r, metric) for r in results
         }
@@ -144,13 +175,208 @@ def compare_models(
     winners = {}
     for metric, values in comparison["metrics"].items():
         # For FPR, lower is better; everything else higher is better
-        if metric == "false_positive_rate":
+        if metric in ("false_positive_rate", "false_negative_rate"):
             winners[metric] = min(values, key=values.get)
         else:
             winners[metric] = max(values, key=values.get)
     comparison["winners"] = winners
 
     return comparison
+
+
+def compute_silhouette_metric(
+    X: np.ndarray,
+    labels: np.ndarray,
+    *,
+    max_samples: int = 2_000,
+    random_state: int = 42,
+) -> dict:
+    """
+    Compute Silhouette Score for predicted normal/anomaly groups in PCA space.
+
+    This is an unsupervised separation indicator only; it does not use labels and
+    does not prove attack-detection correctness.
+    """
+    labels = np.asarray(labels).astype(int)
+    X = np.asarray(X)
+
+    if len(X) != len(labels) or len(labels) < 3:
+        return {
+            "value": None,
+            "applicable": False,
+            "reason": "Not enough aligned samples for Silhouette Score.",
+            "n_samples": int(len(labels)),
+            "groups": {},
+            "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+        }
+
+    unique = np.unique(labels)
+    if len(unique) < 2:
+        return {
+            "value": None,
+            "applicable": False,
+            "reason": "Only one predicted class; Silhouette Score is not applicable.",
+            "n_samples": int(len(labels)),
+            "groups": {str(int(k)): int((labels == k).sum()) for k in unique},
+            "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+        }
+
+    if len(labels) > max_samples:
+        rng = np.random.default_rng(random_state)
+        idx = rng.choice(len(labels), size=max_samples, replace=False)
+        X_eval = X[idx]
+        labels_eval = labels[idx]
+        if len(np.unique(labels_eval)) < 2:
+            return {
+                "value": None,
+                "applicable": False,
+                "reason": "Sample cap selected only one predicted class.",
+                "n_samples": int(len(labels_eval)),
+                "groups": {str(int(k)): int((labels_eval == k).sum()) for k in np.unique(labels_eval)},
+                "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+            }
+    else:
+        X_eval = X
+        labels_eval = labels
+
+    try:
+        value = float(silhouette_score(X_eval, labels_eval))
+    except ValueError as exc:
+        return {
+            "value": None,
+            "applicable": False,
+            "reason": str(exc),
+            "n_samples": int(len(labels_eval)),
+            "groups": {str(int(k)): int((labels_eval == k).sum()) for k in np.unique(labels_eval)},
+            "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+        }
+
+    return {
+        "value": round(value, 4),
+        "applicable": True,
+        "reason": (
+            "Computed from PCA-space features and predicted normal/anomaly groups; "
+            "interpret as separation only, not labelled correctness."
+        ),
+        "n_samples": int(len(labels_eval)),
+        "groups": {str(int(k)): int((labels_eval == k).sum()) for k in np.unique(labels_eval)},
+        "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+    }
+
+
+def threshold_analysis(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+    *,
+    model_name: str = "model",
+    max_rows: int = 41,
+    target_recall: tuple[float, float] = (0.92, 0.97),
+    target_fpr: tuple[float, float] = (0.03, 0.06),
+) -> dict:
+    """
+    Evaluate how score thresholds affect labelled post-run verification metrics.
+
+    Labels are used only here, after unsupervised scoring, to explain tradeoffs.
+    The recommended threshold is report-only and must not update trained artifacts.
+    """
+    y_true = np.asarray(y_true).astype(int)
+    scores = np.asarray(anomaly_scores, dtype=float)
+    if len(y_true) != len(scores) or len(scores) == 0:
+        return {
+            "available": False,
+            "reason": "Threshold analysis requires aligned labels and anomaly scores.",
+            "table": [],
+            "recommended": None,
+        }
+
+    finite_mask = np.isfinite(scores)
+    y_true = y_true[finite_mask]
+    scores = scores[finite_mask]
+    if len(scores) == 0:
+        return {
+            "available": False,
+            "reason": "No finite anomaly scores available.",
+            "table": [],
+            "recommended": None,
+        }
+
+    quantiles = np.linspace(0.0, 1.0, max_rows)
+    thresholds = np.unique(np.quantile(scores, quantiles))
+    rows = []
+    for threshold in thresholds:
+        y_pred = (scores > threshold).astype(int)
+        metrics = evaluate_model(y_true, y_pred, model_name).to_dict()
+        rows.append({
+            "threshold": round(float(threshold), 6),
+            "tp": metrics["tp"],
+            "tn": metrics["tn"],
+            "fp": metrics["fp"],
+            "fn": metrics["fn"],
+            "recall": metrics["recall"],
+            "true_positive_rate": metrics["true_positive_rate"],
+            "false_negative_rate": metrics["false_negative_rate"],
+            "false_positive_rate": metrics["false_positive_rate"],
+            "precision": metrics["precision"],
+            "f1": metrics["f1"],
+            "accuracy": metrics["accuracy"],
+        })
+
+    recall_low, recall_high = target_recall
+    fpr_low, fpr_high = target_fpr
+
+    ideal = [
+        row for row in rows
+        if recall_low <= row["recall"] <= recall_high
+        and fpr_low <= row["false_positive_rate"] <= fpr_high
+    ]
+    fpr_band = [
+        row for row in rows
+        if fpr_low <= row["false_positive_rate"] <= fpr_high
+    ]
+    fpr_capped = [
+        row for row in rows
+        if row["false_positive_rate"] <= fpr_high
+    ]
+
+    if ideal:
+        recommended = max(ideal, key=lambda r: (r["recall"], r["f1"], -r["false_positive_rate"]))
+        target_achieved = True
+        reason = "Meets the requested Recall and FPR target bands."
+    elif fpr_band:
+        recommended = max(fpr_band, key=lambda r: (r["recall"], r["f1"], -r["false_negative_rate"]))
+        target_achieved = False
+        reason = "FPR is inside the target band, but Recall is outside the requested range."
+    elif fpr_capped:
+        recommended = max(fpr_capped, key=lambda r: (r["recall"], r["f1"], -r["false_positive_rate"]))
+        target_achieved = False
+        reason = "No threshold hits the full target; selected highest Recall with FPR <= 6%."
+    else:
+        def band_distance(row):
+            recall = row["recall"]
+            fpr = row["false_positive_rate"]
+            recall_gap = 0.0 if recall_low <= recall <= recall_high else min(abs(recall - recall_low), abs(recall - recall_high))
+            fpr_gap = 0.0 if fpr_low <= fpr <= fpr_high else min(abs(fpr - fpr_low), abs(fpr - fpr_high))
+            return recall_gap + fpr_gap
+
+        recommended = min(rows, key=lambda r: (band_distance(r), r["false_negative_rate"], r["false_positive_rate"]))
+        target_achieved = False
+        reason = "No threshold meets the acceptable FPR cap; selected closest observed tradeoff."
+
+    return {
+        "available": True,
+        "verification_only": True,
+        "score_space": "raw_anomaly_score",
+        "target_recall_range": [recall_low, recall_high],
+        "target_fpr_range": [fpr_low, fpr_high],
+        "target_achieved": target_achieved,
+        "recommendation_reason": reason,
+        "recommended": recommended,
+        "table": rows,
+        "note": (
+            "Report-only threshold analysis. Labels are used after detection to evaluate tradeoffs; "
+            "the trained unsupervised model threshold is not changed."
+        ),
+    }
 
 
 def severity_from_score(score: float) -> str:

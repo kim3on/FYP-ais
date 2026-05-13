@@ -20,9 +20,15 @@ const MODELS = [
 ];
 
 const ALERT_PRESETS = [
-  { label: 'Low', desc: 'All anomalies', value: 0.35 },
-  { label: 'Medium', desc: 'Significant threats', value: 0.5 },
-  { label: 'High', desc: 'Critical only', value: 0.75 },
+  { label: 'Low', value: 0.35 },
+  { label: 'Medium', value: 0.5 },
+  { label: 'High', value: 0.75 },
+];
+
+const ZERO_DAY_PRESETS = [
+  { label: 'Low', value: 0.45 },
+  { label: 'Medium', value: 0.65 },
+  { label: 'High', value: 0.85 },
 ];
 
 const ShieldIcon = () => (
@@ -195,7 +201,7 @@ export default function Settings() {
                     className={`settings-preset ${Math.abs(threshold - preset.value) < 0.01 ? 'active' : ''}`}
                     onClick={() => setThreshold(preset.value)}
                   >
-                    {preset.label} <span>{preset.desc}</span>
+                    {preset.label}
                   </button>
                 ))}
               </div>
@@ -214,6 +220,18 @@ export default function Settings() {
             </FieldBlock>
 
             <FieldBlock label="Zero-Day Candidate Threshold">
+              <div className="settings-preset-row">
+                {ZERO_DAY_PRESETS.map(preset => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className={`settings-preset ${Math.abs(zdThreshold - preset.value) < 0.01 ? 'active' : ''}`}
+                    onClick={() => setZdThreshold(preset.value)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
               <div className="settings-range-card">
                 <div>
                   <span>Novelty Score</span>

@@ -14,10 +14,10 @@ Replace the mock authentication system with a robust, production-ready JWT-based
 ### 1. Update Dependencies
 Add the following packages to `requirements.txt`:
 - `PyJWT>=2.8.0`
-- `passlib[bcrypt]>=1.7.4`
+- `bcrypt>=4.0.0`
 
 ### 2. Implement Core Auth Logic (`app/routers/auth.py`)
-- Add `passlib.context.CryptContext` to handle bcrypt password hashing and verification.
+- Add direct bcrypt password hashing and verification helpers.
 - Add JWT creation logic using `jwt.encode` with a defined `SECRET_KEY` and expiration time (e.g., 24 hours).
 - Implement `get_current_user` dependency using FastAPI's `OAuth2PasswordBearer`:
   - Decode the token and extract the username.
@@ -52,7 +52,7 @@ Apply the `get_current_user` dependency to all protected routes.
 
 
 Key Changes
-   1. Secure Hashing & JWT: Integrated PyJWT and passlib[bcrypt]. All passwords are now stored as secure hashes, and the mock demo token has been replaced with signed 
+   1. Secure Hashing & JWT: Integrated PyJWT and bcrypt. All passwords are now stored as secure hashes, and the mock demo token has been replaced with signed 
       JWTs valid for 24 hours.
    2. Auth Dependency: Implemented a get_current_user dependency in app/routers/auth.py that validates the JWT, checks for a valid user in the database, and ensures   
       they have an assigned role.

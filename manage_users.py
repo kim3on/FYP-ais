@@ -11,7 +11,7 @@ import sys
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, engine
 from app.models.db_models import UserDB, Base
-from app.routers.auth import get_password_hash
+from app.routers.auth import get_password_hash, ensure_user_profile
 
 def add_user(username, password, role):
     db = SessionLocal()
@@ -25,6 +25,8 @@ def add_user(username, password, role):
         hashed_password = get_password_hash(password)
         new_user = UserDB(username=username, password=hashed_password, role=role)
         db.add(new_user)
+        db.flush()
+        ensure_user_profile(db, new_user)
         db.commit()
         print(f"Successfully added user '{username}' with role '{role}'.")
     finally:
@@ -34,10 +36,15 @@ def list_users():
     db = SessionLocal()
     try:
         users = db.query(UserDB).all()
-        print(f"{'ID':<5} | {'Username':<15} | {'Role':<25}")
-        print("-" * 50)
+        print(f"{'ID':<5} | {'Username':<15} | {'Role':<25} | {'Display Name':<20} | {'SOC Tier':<14} | {'Shift':<12}")
+        print("-" * 104)
         for u in users:
-            print(f"{u.id:<5} | {u.username:<15} | {u.role:<25}")
+            profile = ensure_user_profile(db, u)
+            print(
+                f"{u.id:<5} | {u.username:<15} | {u.role:<25} | "
+                f"{(profile.display_name or ''):<20} | {(profile.soc_tier or ''):<14} | {(profile.shift or ''):<12}"
+            )
+        db.commit()
     finally:
         db.close()
 

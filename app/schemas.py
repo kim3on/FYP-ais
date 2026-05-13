@@ -13,6 +13,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UserProfileUpdate(BaseModel):
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+    soc_tier: Optional[str] = None
+    team: Optional[str] = None
+    shift: Optional[str] = None
+    timezone: Optional[str] = None
+    escalation_contact: Optional[str] = None
+
+
 class TrainConfig(BaseModel):
     r: float = 0.15
     r_s: Optional[float] = None   # Self-tolerance (V-Detector); defaults to min(r*0.1, 0.05)

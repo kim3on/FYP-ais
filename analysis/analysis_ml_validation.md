@@ -3,15 +3,17 @@
 **Date:** 2026-05-02
 **Context:** @ml-engineer @statistical-analysis
 
+> **Current status (May 2026):** This report records the original leakage audit. The current pipeline still follows split-before-fit, but preprocessing has advanced from MinMax-only scaling to `RobustScaler` followed by `PCA(whiten=True)` so the NSA operates in calibrated PCA space.
+
 ## 1. Objective
 To validate the statistical integrity of the AIS-Detect training pipeline and ensure benchmark fairness against the Isolation Forest baseline.
 
 ## 2. Audit Findings
 
 ### 2.1 Preprocessing Data Leakage (Resolved)
-*   **Finding:** The `MinMaxScaler` was fitted on the entire dataset *before* the train/test split.
+*   **Finding:** The original scaler was fitted on the entire dataset *before* the train/test split.
 *   **Impact:** Information from the test set (max/min values of future attacks) leaked into the training feature space. This resulted in "compressed" feature ranges and artificially inflated performance metrics.
-*   **Fix:** Refactored `CICIDSPreprocessor` and `TrainingPipeline` to implement a strict **Split-Before-Fit** pattern.
+*   **Fix:** Refactored `CICIDSPreprocessor` and `TrainingPipeline` to implement a strict **Split-Before-Fit** pattern. The current implementation fits `RobustScaler` and `PCA(whiten=True)` only on the training split.
 
 ### 2.2 Benchmark Fairness
 *   **Status:** **Verified**.
@@ -32,4 +34,4 @@ The refactored pipeline was verified using `validate_ml.py`.
 
 ## 4. Recommendations
 *   Continue using `stratify=y` during splits to maintain attack distribution in small datasets.
-*   Maintain the current $[0, 1]$ normalization as it is optimal for Euclidean-based AIS detectors.
+*   Maintain `RobustScaler + PCA(whiten=True)` for current AIS experiments; NSA detector generation and thresholds must stay calibrated to PCA space rather than assuming `[0,1]` feature bounds.

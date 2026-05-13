@@ -25,12 +25,12 @@ Yes, your `.md` is directionally good. I’d **combine it** with my fix, because
    - keep it smaller than `r`
    - enforce minimum/maximum bounds
 
-5. **Be careful with replacing MinMaxScaler**
-   I agree MinMax is outlier-sensitive, but since you already use PCA after scaling, I’d prefer:
+5. **Replace MinMaxScaler with RobustScaler before PCA**
+   The implemented pipeline now uses:
    ```text
-   RobustScaler → PCA → optional whitening → NSA
+   RobustScaler → PCA(whiten=True) → NSA
    ```
-   For distance-based AIS, `RobustScaler + PCA(whiten=True)` is especially clean because Euclidean distance becomes more balanced across PCA components.
+   For distance-based AIS, `RobustScaler + PCA(whiten=True)` is cleaner because Euclidean distance becomes more balanced across PCA components.
 
 **My recommendation**
 Use this architecture:
@@ -39,7 +39,7 @@ Use this architecture:
 Raw CIC features
 → clean inf/NaN/extremes
 → RobustScaler
-→ PCA, preferably whiten=True
+→ PCA(whiten=True)
 → NSA with learned PCA-space bounds
 → dynamic r and r_s from benign distance distribution
 ```

@@ -34,6 +34,7 @@ export default function Capture() {
         const s = await getCaptureStatus();
         setStatus(s);
         setCaptureRunning(s.active || false);
+        setError(s.sniffer_error || '');
       } catch(err) {
         console.error("Failed to fetch capture status:", err);
       }
@@ -61,7 +62,10 @@ export default function Capture() {
     setError('');
     try {
       await startCapture(selectedIf);
-      setCaptureRunning(true);
+      const s = await getCaptureStatus();
+      setStatus(s);
+      setCaptureRunning(s.active || false);
+      setError(s.sniffer_error || '');
     } catch(err) { setError(err.message); }
   }
 

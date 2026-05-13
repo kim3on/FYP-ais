@@ -17,7 +17,12 @@ from datetime import datetime
 from sklearn.model_selection import train_test_split
 
 from app.core.preprocessor import CICIDSPreprocessor
-from app.core.evaluator import evaluate_model, compare_models
+from app.core.evaluator import (
+    METRIC_EXPLANATIONS,
+    compare_models,
+    compute_silhouette_metric,
+    evaluate_model,
+)
 from app.models.nsa import NegativeSelectionDetector
 from app.models.isolation_forest import IsolationForestDetector
 
@@ -109,34 +114,48 @@ class TrainingPipeline:
         # Encode binary labels for splitting
         df_raw, y_all = preprocessor._encode_labels(df_raw, label_col)
 
-        # ── 2. TRAIN/TEST SPLIT ────────────────────────────────────────
-        # SPLIT RAW DATA FIRST to ensure no leakage from test set to training scaler
-        log("[INFO] Creating train/test split (raw data) to prevent leakage...")
-        
-        df_train_raw, df_test_raw, y_train, y_test = train_test_split(
-            df_raw, y_all,
-            test_size=self.test_size,
+        # ── 2. UNSUPERVISED BENIGN SPLITS ──────────────────────────────
+        # Labels are used only to select BENIGN rows for self training.
+        # Attack labels never influence scaler/PCA, NSA fitting, or threshold tuning.
+        val_stats = preprocessor.validation_stats(y_all, df_raw)
+        benign_mask = y_all == 0
+        df_benign = df_raw.loc[benign_mask].reset_index(drop=True)
+        if len(df_benign) < 10:
+            raise ValueError("Training requires at least 10 BENIGN rows for unsupervised calibration")
+
+        log("[INFO] Creating BENIGN-only train/calibration/test splits...")
+        holdout_size = min(max(self.test_size * 2, 0.2), 0.5)
+        df_train_raw, df_holdout_raw = train_test_split(
+            df_benign,
+            test_size=holdout_size,
             random_state=self.random_state,
-            stratify=y_all,
+            shuffle=True,
+        )
+        df_cal_raw, df_test_raw = train_test_split(
+            df_holdout_raw,
+            test_size=0.5,
+            random_state=self.random_state,
+            shuffle=True,
         )
 
         # ── 3. FIT PREPROCESSOR ON TRAINING DATA ONLY ──────────────────
-        log("[INFO] Fitting feature scaler on training portion only...")
+        log("[INFO] Fitting feature scaler on BENIGN training rows only...")
         preprocessor.fit(df_train_raw)
+        val_stats["n_features"] = len(preprocessor.feature_columns_ or [])
         
-        # Transform both portions
+        # Transform benign-only portions
         X_train, _ = preprocessor.transform_df(df_train_raw)
+        X_cal, df_cal_meta = preprocessor.transform_df(df_cal_raw)
         X_test, df_test_meta = preprocessor.transform_df(df_test_raw)
 
-        val_stats = preprocessor.validation_stats(y_all, df_raw)
         log(f"[OK] Dataset validated: {val_stats['total_records']:,} records.")
-        log(f"[OK] Preprocessor fitted on {len(X_train):,} training samples.")
+        log(
+            f"[OK] BENIGN split: {len(X_train):,} train / "
+            f"{len(X_cal):,} calibration / {len(X_test):,} test."
+        )
         
         # ── 4. TRAIN NSA ───────────────────────────────────────────────
         log("[NSA] Beginning Negative Selection Algorithm...")
-        # NSA only trains on NORMAL samples
-        X_train_normal = X_train[y_train == 0]
-        
         nsa = NegativeSelectionDetector(
             r=self.r,
             r_s=self.r_s,
@@ -144,30 +163,48 @@ class TrainingPipeline:
             max_attempts=self.max_attempts,
             random_state=self.random_state,
         )
-        nsa.fit(X_train_normal)
+        nsa.fit(X_train)
 
         log(f"[OK] {nsa.meta_['mature_detectors']:,} V-detectors generated "
             f"(radius range: {nsa.meta_['det_radius_min']:.3f}-{nsa.meta_['det_radius_max']:.3f}).")
 
+        log("[INFO] Calibrating anomaly threshold on BENIGN calibration rows only...")
+        calibration = nsa.calibrate_threshold(X_cal, target_fpr=0.01)
+        log(
+            f"[OK] Unsupervised threshold: {calibration['threshold']:.6f} "
+            f"(target FPR {calibration['target_fpr'] * 100:.2f}%, "
+            f"observed {calibration['observed_fpr'] * 100:.2f}%)."
+        )
+
         # ── 5. TRAIN ISOLATION FOREST ──────────────────────────────────
-        log("[INFO] Training Isolation Forest baseline...")
+        log("[INFO] Training Isolation Forest baseline on BENIGN rows only...")
         iso = IsolationForestDetector(
             contamination=self.contamination,
             random_state=self.random_state,
         )
-        # Isolation Forest is semi-supervised (trains on mixed data)
         iso.fit(X_train)
         log("[OK] Isolation Forest training complete.")
 
         # ── 6. EVALUATE ───────────────────────────────────────────────
-        log("[INFO] Evaluating models on held-out test set...")
+        log("[INFO] Evaluating benign holdout false-positive behaviour...")
         nsa_labels, nsa_scores = nsa.predict_with_scores(X_test)
         iso_labels, iso_scores = iso.predict_with_scores(X_test)
 
+        y_test = np.zeros(len(X_test), dtype=int)
         nsa_result = evaluate_model(y_test, nsa_labels, "AIS (NSA)", df_test_meta)
         iso_result = evaluate_model(y_test, iso_labels, "Isolation Forest", df_test_meta)
+        nsa_silhouette = compute_silhouette_metric(X_test, nsa_labels, random_state=self.random_state)
+        iso_silhouette = compute_silhouette_metric(X_test, iso_labels, random_state=self.random_state)
+        self_intrusion_rate = nsa_result.false_positive_rate
 
-        log(f"[OK] NSA F1: {nsa_result.f1:.4f} | ISO F1: {iso_result.f1:.4f}")
+        log(
+            f"[OK] NSA benign FPR: {nsa_result.false_positive_rate:.4f} | "
+            f"ISO benign FPR: {iso_result.false_positive_rate:.4f}"
+        )
+        log(
+            f"[OK] AIS Self Intrusion Rate: {self_intrusion_rate * 100:.2f}% "
+            "(benign validation flagged as anomaly)."
+        )
 
         comparison = compare_models([nsa_result, iso_result])
 
@@ -183,13 +220,53 @@ class TrainingPipeline:
         log(f"[METRICS] Total pipeline duration: {duration:.2f} seconds")
         log("[SYSTEM] Status: LEARNING -> ACTIVE")
 
+        nsa_eval = nsa_result.to_dict()
+        nsa_eval["labelled_attack_metrics_applicable"] = False
+        nsa_eval["training_metric_note"] = (
+            "Benign-only training validation has no attack class; precision, recall, F1, "
+            "TPR, and FNR are intentionally not reported here."
+        )
+        for attack_metric in ("precision", "recall", "f1", "false_negative_rate", "detection_rate", "true_positive_rate"):
+            nsa_eval[attack_metric] = None
+        nsa_eval["self_intrusion_rate"] = round(self_intrusion_rate, 4)
+        nsa_eval["silhouette_score"] = nsa_silhouette["value"]
+        nsa_eval["silhouette"] = nsa_silhouette
+
+        iso_eval = iso_result.to_dict()
+        iso_eval["labelled_attack_metrics_applicable"] = False
+        iso_eval["training_metric_note"] = (
+            "Benign-only training validation has no attack class; precision, recall, F1, "
+            "TPR, and FNR are intentionally not reported here."
+        )
+        for attack_metric in ("precision", "recall", "f1", "false_negative_rate", "detection_rate", "true_positive_rate"):
+            iso_eval[attack_metric] = None
+        iso_eval["silhouette_score"] = iso_silhouette["value"]
+        iso_eval["silhouette"] = iso_silhouette
+
         result = {
             "nsa_summary":      nsa.summary(),
             "iso_summary":      iso.summary(),
-            "nsa_eval":         nsa_result.to_dict(),
-            "iso_eval":         iso_result.to_dict(),
+            "nsa_eval":         nsa_eval,
+            "iso_eval":         iso_eval,
             "comparison":       comparison,
             "validation_stats": val_stats,
+            "validation_mode":   "unsupervised_benign_calibrated",
+            "calibration_summary": calibration,
+            "ais_metrics": {
+                "self_intrusion_rate": round(self_intrusion_rate, 4),
+                "self_intrusion_rate_pct": round(self_intrusion_rate * 100, 2),
+                "explanation": METRIC_EXPLANATIONS["self_intrusion_rate"],
+            },
+            "unsupervised_validation": {
+                "silhouette": nsa_silhouette,
+                "silhouette_score": nsa_silhouette["value"],
+                "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+            },
+            "metric_explanations": METRIC_EXPLANATIONS,
+            "unsupervised_note": (
+                "Labels are used only to select BENIGN self rows and for reporting. "
+                "No attack labels are used to fit PCA/scaler, train detectors, or tune thresholds."
+            ),
             "duration_seconds": round(duration, 2),
             "trained_at":       t0.isoformat(),
         }

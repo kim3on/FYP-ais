@@ -3,6 +3,8 @@
 **Date:** 2026-05-02
 **Skill Context:** @security-auditor @007
 
+> **Current status (May 2026):** This is a historical audit baseline. The May 6 update addressed the original demo-auth findings by adding JWT authentication, bcrypt password hashing, protected non-health API routes, and token validation for `/ws/live`. Keep the findings below as the original risk record, not as the current implementation state.
+
 ## 1. Executive Summary
 While the AIS-Detect system demonstrates significant technical merit in its immunological approach to anomaly detection, it currently possesses **critical security vulnerabilities** that would allow an attacker to bypass authentication, hijack live network data, and potentially execute code via the active response engine.
 
@@ -41,10 +43,10 @@ While the AIS-Detect system demonstrates significant technical merit in its immu
 
 | Test Case | Status | Severity |
 | :--- | :--- | :--- |
-| Auth Token Predictability | **FAIL** | CRITICAL |
-| WebSocket Authentication | **FAIL** | CRITICAL |
+| Auth Token Predictability | **RESOLVED MAY 6** | JWT now used |
+| WebSocket Authentication | **RESOLVED MAY 6** | token query parameter required |
 | IP Sanitisation | **PASS** | LOW (via Regex) |
-| Detection Evasion Risk | **HIGH** | ARCHITECTURAL |
+| Detection Evasion Risk | **MITIGATED** | V-Detector + dynamic PCA-space thresholds |
 
 ## 6. Conclusion
-The system is currently a **"Security Theatre"** implementation. It detects anomalies but is itself highly vulnerable to trivial exploitation. Immediate refactoring of the authentication layer and WebSocket security is mandatory before deployment.
+The original May 2 implementation was a **"Security Theatre"** implementation. The May 6 security update remediated the most critical authentication and WebSocket exposure issues. Remaining hardening before public deployment includes moving secrets to environment variables, enforcing finer-grained role authorization, restricting CORS, and replacing SQLite for multi-user/cloud deployments.

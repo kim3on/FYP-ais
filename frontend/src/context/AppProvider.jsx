@@ -8,7 +8,7 @@ export function AppProvider({ children }) {
   const [dashStats, setDashStats]     = useState(null);
   const [activeModel, setActiveModel] = useState('nsa');
   const [captureRunning, setCaptureRunning] = useState(false);
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState('light');
 
   // Sync theme to DOM
   useEffect(() => {

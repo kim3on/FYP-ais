@@ -43,9 +43,11 @@ Browser → POST /api/auth/login  { username, password }
        ← { token, role }
 ```
 
-- `app/routers/auth.py` queries the `users` SQLite table.
-- On success, a session token is returned and stored in the frontend React context (`AuthContext`).
-- All subsequent API calls include this token in the `Authorization` header.
+- `app/routers/auth.py` verifies the user against the `users` SQLite table.
+- Passwords are stored as bcrypt hashes, not plaintext.
+- On success, a signed JWT is returned and stored in the frontend React context (`AuthContext`).
+- All subsequent HTTP API calls include `Authorization: Bearer <token>`.
+- Live WebSocket clients pass the same JWT as `/ws/live?token=<token>`; invalid or missing tokens are rejected before the socket is accepted.
 
 ---
 
@@ -84,11 +86,11 @@ train_test_split(stratify=y)         ← Step 3: 80/20 split on RAW data
     └── df_test_raw   (20%)
     │
     ▼
-CICIDSPreprocessor.fit(df_train_raw) ← Step 4: Fit MinMaxScaler on training set ONLY
+CICIDSPreprocessor.fit(df_train_raw) ← Step 4: Fit RobustScaler + PCA on training set ONLY
     │
     ▼
-preprocessor.transform_df()          ← Step 5: Scale both train & test to [0, 1]
-    │                                            77 numeric CIC-IDS-2017 features
+preprocessor.transform_df()          ← Step 5: Transform both train & test into PCA feature space
+    │                                            RobustScaler → PCA(whiten=True)
     ├── X_train  (float32 array)
     └── X_test   (float32 array)
     │
@@ -119,7 +121,8 @@ _state["status"] = "active"
 | Dedup columns | Drop second occurrence of `Fwd Header Length` |
 | Fix quality | Replace `±Inf` → NaN → 0; clip to `±1e12` |
 | Select numeric | Drop any remaining non-numeric columns |
-| Scale | `MinMaxScaler` → all 77 features normalised to `[0, 1]` |
+| Scale | `RobustScaler` reduces outlier impact using median/IQR |
+| Reduce dimensions | `PCA(whiten=True)` projects features into balanced PCA space |
 
 ### 3.4 NSA V-Detector Training — `app/models/nsa.py`
 
@@ -132,16 +135,22 @@ X_train_normal  (BENIGN samples only)
 Build self-reference set (cap at 5,000 points via random sample)
     │
     ▼
+Auto-calibrate thresholds from benign PCA-space distances
+    │   r   = high-percentile self-distance threshold
+    │   r_s = high-percentile nearest-neighbour self-tolerance margin
+    │
+    ▼
 KMeans(50 clusters) on self → cluster centroids
     │
     ▼
-Candidate generation loop (up to max_attempts = 10,000):
+Candidate generation loop (default max_attempts = 30,000):
     │
-    ├── Phase 1 (first 250 detectors):
+    ├── Phase 1 (first half of detector target):
     │       candidate = centroid + Normal(0, r×3.0)   [Smart sampling]
     │
-    └── Phase 2 (remaining detectors):
+    └── Phase 2 (remaining detector target):
             candidate = self_point + Normal(0, r×1.5) [Boundary mutation]
+            (no [0,1] clipping; candidates live in PCA space)
     │
     ▼
 Negative Selection Filter:
@@ -156,7 +165,7 @@ V-Detector radius = dist_to_nearest_self − r_s
 Inter-detector spacing check → reject candidates too close to existing detectors
     │
     ▼
-Mature detector repertoire: up to 500 V-detectors stored as float32 arrays
+Mature detector repertoire: up to 1,000 V-detectors by API default
 Aging counters initialised (match_counts, idle_batches)
 ```
 
@@ -180,7 +189,7 @@ _build_engine()                      ← Load NSA/IsoForest + preprocessor from 
 DetectionEngine.detect_from_csv()    ← app/core/detection.py
     │
     ▼
-preprocessor.transform()             ← Clean + scale using FITTED scaler (no refit)
+preprocessor.transform()             ← Clean + transform using FITTED scaler/PCA (no refit)
     │   Preserves: Destination Port, Protocol, attack_category for heuristics
     ▼
 model.predict_with_details(X_scaled) ← NSA or IsoForest inference
@@ -213,7 +222,7 @@ Dashboard / Alerts page updated
 
 ## Phase 5 — Live Packet Capture & Real-Time Detection
 
-This is the **streaming mode** — packets are sniffed, assembled into flows, scored, and pushed to the browser over WebSocket.
+This is the **streaming mode** — packets are sniffed, assembled into flows, scored, and pushed to authenticated browser clients over WebSocket.
 
 ### 5.1 Start Capture
 
@@ -222,7 +231,7 @@ Browser → POST /api/capture/start?interface=eth0
         ← { status: "capturing" }
 ```
 
-Prerequisite: `models_ready()` must be true (artefacts exist on disk).
+Prerequisites: `models_ready()` must be true (artefacts exist on disk), and the request must include a valid JWT.
 
 ### 5.2 Packet → Flow → Feature → Alert Pipeline
 
@@ -269,7 +278,7 @@ asyncio.run_coroutine_threadsafe(
 )
     │
     ▼  WebSocket push to all connected browsers
-WS /ws/live  →  { type: "flow", data: { anomalies_found, alerts, chart_... } }
+WS /ws/live?token=<jwt>  →  { type: "flow", data: { anomalies_found, alerts, chart_... } }
     │
     ▼
 React Dashboard (LiveCapturePage / Dashboard.jsx)
@@ -301,6 +310,7 @@ AlertRecord generated by DetectionEngine
     ▼
 GET /api/alerts          ← Alerts page fetches paginated list
 PATCH /api/alerts/{id}   ← Analyst marks as false positive
+GET /api/alerts/export.csv ← Analyst exports CSV with risk_score, repeat counts, recommended_action
     │
     ▼
 User reviews alert → clicks "Block IP"
@@ -369,7 +379,7 @@ _state = {
 |---|---|
 | `nsa_model.pkl` | Fitted `NegativeSelectionDetector` (detectors, radii, self-reference) |
 | `iso_model.pkl` | Fitted `IsolationForestDetector` |
-| `preprocessor.pkl` | Fitted `CICIDSPreprocessor` (MinMaxScaler + feature_columns_) |
+| `preprocessor.pkl` | Fitted `CICIDSPreprocessor` (RobustScaler + PCA + feature_columns_) |
 | `last_train_result.json` | Training metrics (F1, Precision, Recall, duration) |
 
 ---
@@ -416,7 +426,7 @@ _state = {
 │                                └→ FlowFeatureExtractor (77 feats)  │
 │                                     └→ DetectionEngine.detect_sample│
 │                                          └→ WS broadcast           │
-│  /ws/live        → WebSocket → Browser (live chart + alerts)       │
+│  /ws/live        → Authenticated WebSocket → Browser live updates  │
 │                                                                     │
 │  /api/alerts     → Alert CRUD + false-positive marking             │
 │  /api/firewall   → Windows Firewall block/unblock (PowerShell)     │
@@ -437,12 +447,14 @@ _state = {
 
 | Decision | Rationale |
 |---|---|
-| Train/test split **before** fitting the scaler | Prevents data leakage — test set statistics never influence the scaler |
+| Train/test split **before** fitting the scaler/PCA | Prevents data leakage — test set statistics never influence preprocessing |
+| RobustScaler + PCA whitening | Reduces outlier compression and keeps NSA distances meaningful in lower-dimensional feature space |
+| Dynamic NSA thresholds | Calibrates `r` and `r_s` from benign PCA-space distances instead of hard-coded `[0,1]` assumptions |
 | NSA trains on **BENIGN only** | Mirrors biological negative selection — detectors are educated against self |
 | IsoForest trains on **all** samples | Semi-supervised baseline for comparison |
 | Variable-radius V-detectors | Detectors automatically expand to cover as much non-self space as possible |
 | Self-gap fallback (innate immune) | Catches anomalies in regions not yet covered by any detector |
 | Detector aging (`idle_batches`) | Models finite T-cell lifespan; stale detectors can be refreshed |
 | Feature extraction mimics CICFlowMeter | Live capture produces the exact same 77 features as the training dataset |
-| WebSocket + HTTP polling fallback | Ensures real-time updates even if WS is blocked by a proxy |
+| Authenticated WebSocket + HTTP polling fallback | Ensures real-time updates while requiring valid user access |
 | Windows Firewall via PowerShell | Allows one-click IP blocking directly from the dashboard |

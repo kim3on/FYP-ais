@@ -188,6 +188,7 @@
   padding: 9px 12px;
   font-size: 11px;
   text-align: center;
+  min-height: 36px;
 }
 
 .settings-preset span {
@@ -224,10 +225,6 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
-}
-
-.settings-range-card input {
-  accent-color: var(--iris);
 }
 
 .settings-data-card {

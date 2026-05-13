@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Float, Boolean, Integer, JSON
+from sqlalchemy import Column, String, Float, Boolean, Integer, JSON, ForeignKey
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 class UserDB(Base):
@@ -8,6 +9,24 @@ class UserDB(Base):
     username = Column(String, unique=True, index=True)
     password = Column(String)
     role = Column(String)
+    profile = relationship("UserProfileDB", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+class UserProfileDB(Base):
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    display_name = Column(String)
+    email = Column(String)
+    phone = Column(String)
+    job_title = Column(String)
+    soc_tier = Column(String)
+    team = Column(String)
+    shift = Column(String)
+    timezone = Column(String)
+    escalation_contact = Column(String)
+
+    user = relationship("UserDB", back_populates="profile")
 
 class AlertDB(Base):
     __tablename__ = "alerts"

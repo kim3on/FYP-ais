@@ -1,5 +1,7 @@
 Here is a brutal, no-holds-barred architectural review from the perspective of a Senior SOC Architect evaluating this system for enterprise deployment.
 
+> **Current status (May 2026):** This document is a historical critical review of the earlier prototype. Several security-specific findings have since been addressed: JWT authentication replaced demo tokens, bcrypt replaced plaintext password checks, and `/ws/live` now requires a token. The broader SOC-scale concerns about Scapy ingestion, SQLite, explainability, SIEM integration, and production deployment still apply.
+
 ### Executive Summary
 Let’s cut to the chase: **This is an academic proof-of-concept, not a production-ready enterprise security product.** 
 
@@ -29,10 +31,10 @@ Here is the critical breakdown of why this system belongs in a lab, not a datace
 
 ### 4. Security & Compliance
 **Verdict: A Walking Compliance Violation**
-As your own `README` admits, this is "Security Theatre".
-* **Cleartext Passwords & Fake Tokens:** Passwords are checked in plain text (`user.password != req.password`). Tokens are generated as `f"demo-token-{user.username}"`. This fails PCI-DSS, SOC2, ISO27001, and basic common sense.
+The original prototype had critical authentication gaps that have since been remediated in the May 6 update.
+* **Authentication status:** Passwords are now hashed with bcrypt, API sessions use signed JWTs, and non-health API routes require authentication.
 * **Root Execution Requirement:** Because Scapy requires a raw socket, you have to run this entire Python application (including the web server) as root/Administrator. Running a vulnerable web server as root is a massive security risk.
-* **Unauthenticated WebSockets:** Your `/ws/live` endpoint has no auth checks. Anyone on the network can connect and stream all network metadata.
+* **WebSocket status:** `/ws/live` now validates a JWT query token before accepting the connection.
 
 ### 5. Analyst Workflow & SIEM Integration
 **Verdict: Isolated Silo**
@@ -59,5 +61,5 @@ If you pivot the marketing from "Enterprise SOC Tool" to "ML Network Research Pl
 **To move this from Academic to Production, you must:**
 1. Rip out Scapy. Ingest Zeek logs (conn.log, http.log) or use NFQUEUE/AF_PACKET via a compiled language (Rust/C).
 2. Ditch the static SQLite database for a time-series DB (Elasticsearch, ClickHouse).
-3. Replace the `demo-token` and cleartext passwords with proper JWT/OAuth2.
+3. Move secrets and role policy into deployment configuration; the current JWT/bcrypt implementation is suitable for FYP demo scope but still needs production hardening.
 4. Implement SHAP (SHapley Additive exPlanations) values so the ML model can actually tell the analyst *why* a flow is anomalous.

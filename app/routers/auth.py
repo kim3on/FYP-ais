@@ -13,9 +13,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from app.schemas import LoginRequest
+from app.schemas import LoginRequest, UserProfileUpdate
 from app.core.database import get_db
-from app.models.db_models import UserDB
+from app.models.db_models import UserDB, UserProfileDB
 
 # ── Auth Configuration ───────────────────────────────────────────────────
 SECRET_KEY = "ais-detect-secret-key-change-me-in-production"
@@ -27,6 +27,79 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # ── Utilities ─────────────────────────────────────────────────────────────
+
+PROFILE_FIELDS = [
+    "display_name",
+    "email",
+    "phone",
+    "job_title",
+    "soc_tier",
+    "team",
+    "shift",
+    "timezone",
+    "escalation_contact",
+]
+
+def default_profile_for_user(user: UserDB) -> dict:
+    role = (user.role or "").lower()
+    username = user.username or ""
+    if username == "admin" or "administrator" in role:
+        return {
+            "display_name": "AIS Administrator",
+            "email": "admin@soc.local",
+            "phone": "",
+            "job_title": "Network Administrator",
+            "soc_tier": "Platform Admin",
+            "team": "SOC Platform Team",
+            "shift": "On Call",
+            "timezone": "Asia/Kuala_Lumpur",
+            "escalation_contact": "SOC Lead",
+        }
+    return {
+        "display_name": "SOC Analyst",
+        "email": f"{username or 'analyst'}@soc.local",
+        "phone": "",
+        "job_title": "Security Analyst",
+        "soc_tier": "Tier 1 SOC",
+        "team": "SOC Operations",
+        "shift": "Day Shift",
+        "timezone": "Asia/Kuala_Lumpur",
+        "escalation_contact": "SOC Lead",
+    }
+
+def ensure_user_profile(db: Session, user: UserDB) -> UserProfileDB:
+    if user.profile:
+        return user.profile
+
+    profile = UserProfileDB(user_id=user.id, **default_profile_for_user(user))
+    db.add(profile)
+    db.flush()
+    db.refresh(user)
+    return profile
+
+def serialize_profile(profile: UserProfileDB) -> dict:
+    return {field: getattr(profile, field, "") or "" for field in PROFILE_FIELDS}
+
+def role_permissions(role: str) -> str:
+    role_text = (role or "").lower()
+    if "administrator" in role_text or role_text == "admin":
+        return "Full Access (Read/Write)"
+    if "analyst" in role_text:
+        return "Analyst Access (Read/Write)"
+    return "Assigned Role Access"
+
+def serialize_user(db: Session, user: UserDB) -> dict:
+    profile = ensure_user_profile(db, user)
+    return {
+        "username": user.username,
+        "role": user.role,
+        "profile": serialize_profile(profile),
+        "session": {
+            "status": "Active",
+            "authentication_method": "Local JWT",
+            "role_permissions": role_permissions(user.role),
+        },
+    }
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain text password against a stored bcrypt hash."""
@@ -91,10 +164,36 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
         
     access_token = create_access_token(data={"sub": user.username})
+    user_payload = serialize_user(db, user)
+    db.commit()
     
     return {
         "success":  True,
         "username": user.username,
         "role":     user.role,
         "token":    access_token,
+        "user":     user_payload,
     }
+
+@router.get("/me")
+async def me(user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    payload = serialize_user(db, user)
+    db.commit()
+    return payload
+
+@router.patch("/me/profile")
+async def update_me_profile(
+    profile_update: UserProfileUpdate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = ensure_user_profile(db, user)
+    updates = profile_update.model_dump(exclude_unset=True)
+    for field in PROFILE_FIELDS:
+        if field in updates:
+            value = updates[field]
+            setattr(profile, field, value.strip() if isinstance(value, str) else value)
+    db.commit()
+    db.refresh(profile)
+    db.refresh(user)
+    return serialize_user(db, user)

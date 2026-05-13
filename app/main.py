@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.routers import auth, training, detection, alerts, capture, dashboard, firewall
-from app.routers.auth import get_password_hash
+from app.routers.auth import ensure_user_profile, get_password_hash
 from app.core.database import engine
 from app.models.db_models import Base, BlockedIPDB, UserDB
 from app.core.database import SessionLocal
@@ -78,6 +78,10 @@ def on_startup():
             UserDB(username="analyst", password=get_password_hash("analyst123"), role="Security Analyst")
         ])
         db.commit()
+
+    for user in db.query(UserDB).all():
+        ensure_user_profile(db, user)
+    db.commit()
 
     # Load blocked IPs into memory
     blocked = db.query(BlockedIPDB).all()

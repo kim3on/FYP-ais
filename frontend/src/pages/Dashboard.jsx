@@ -212,7 +212,8 @@ export default function Dashboard() {
     try { 
       const s = await getCaptureStatus(); 
       setCaptureStatus(s); 
-      setCaptureRunning(s.active||false); 
+      setCaptureRunning(s.active||false);
+      setCaptureError(s.sniffer_error || '');
     } catch(err) {
       console.error("Failed to refresh capture status:", err);
     }
@@ -239,7 +240,9 @@ export default function Dashboard() {
       try {
         const s = await getCaptureStatus();
         setCaptureStatus(s);
+        setCaptureRunning(s.active || false);
         setLivePktCount(s.packets_captured ?? 0);
+        setCaptureError(s.sniffer_error || '');
       } catch(err) {
         console.error("Failed to poll capture status:", err);
       }
@@ -249,7 +252,13 @@ export default function Dashboard() {
 
   async function handleStartCapture() {
     setCaptureError('');
-    try { await startCapture(selectedIf); setCaptureRunning(true); } catch(e) { setCaptureError(e.message); }
+    try {
+      await startCapture(selectedIf);
+      const s = await getCaptureStatus();
+      setCaptureStatus(s);
+      setCaptureRunning(s.active || false);
+      setCaptureError(s.sniffer_error || '');
+    } catch(e) { setCaptureError(e.message); }
   }
   async function handleStopCapture() {
     try { await stopCapture(); setCaptureRunning(false); } catch(e) { setCaptureError(e.message); }

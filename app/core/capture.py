@@ -36,8 +36,9 @@ scaler.transform() works without any remapping.
 import time
 import threading
 import statistics
+import platform
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,7 @@ class FlowAggregator:
         self._lock      = threading.Lock()
         self._extractor = FlowFeatureExtractor()
         self._on_complete = on_flow_complete
+        self._stop_event = threading.Event()
         self._reaper    = threading.Thread(target=self._reap_loop,
                                            daemon=True, name='flow-reaper')
         self._reaper.start()
@@ -288,6 +290,9 @@ class FlowAggregator:
         Parse a Scapy packet and add it to the appropriate flow.
         Called from the sniffer thread.
         """
+        if self._stop_event.is_set():
+            return
+
         try:
             pkt_data = self._parse(raw_pkt)
         except Exception:
@@ -395,8 +400,7 @@ class FlowAggregator:
 
     def _reap_loop(self):
         """Background thread: expire idle / oversized flows every 5 s."""
-        while True:
-            time.sleep(5)
+        while not self._stop_event.wait(5):
             now = time.time()
             with self._lock:
                 expired = [fid for fid, fl in self._flows.items()
@@ -411,6 +415,19 @@ class FlowAggregator:
         with self._lock:
             for fl in list(self._flows.values()):
                 self._complete(fl)
+
+    def discard_all(self):
+        """Drop open flows without scoring them."""
+        with self._lock:
+            self._flows.clear()
+
+    def stop(self, flush: bool = False):
+        """Stop background expiry and either flush or discard open flows."""
+        self._stop_event.set()
+        if flush:
+            self.flush_all()
+        else:
+            self.discard_all()
 
 
 # ════════════════════════════════════════════════════════════
@@ -449,11 +466,14 @@ class PacketSniffer:
         # Stats
         self.packets_captured = 0
         self.flows_completed  = 0
+        self.error: Optional[str] = None
+        self.resolved_interface: Optional[str] = None
 
     def start(self):
         if self._running:
             return
         self._running = True
+        self.error = None
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._sniff_loop, daemon=True, name='pkt-sniffer'
@@ -461,21 +481,70 @@ class PacketSniffer:
         self._thread.start()
         logger.info(f"PacketSniffer started on interface={self._interface or 'all'}")
 
-    def stop(self):
+    def stop(self, flush: bool = False):
         if not self._running:
             return
         self._running = False
         self._stop_event.set()
-        self._aggregator.flush_all()
+        self._aggregator.stop(flush=flush)
         logger.info(
             f"PacketSniffer stopped. "
             f"Packets={self.packets_captured}, Flows={self.flows_completed}"
         )
 
+    def _resolve_interface(self) -> Any:
+        """
+        Resolve Windows-friendly adapter names (for example, "Wi-Fi") to the
+        Scapy/Npcap interface object. Non-Windows platforms use the given name.
+        """
+        if not self._interface:
+            self.resolved_interface = None
+            return None
+
+        if platform.system().lower() != "windows":
+            self.resolved_interface = self._interface
+            return self._interface
+
+        target = str(self._interface).strip()
+        target_cf = target.casefold()
+
+        try:
+            from scapy.all import conf
+
+            interfaces = list(conf.ifaces.values())
+            for iface in interfaces:
+                candidates = [
+                    getattr(iface, "name", ""),
+                    getattr(iface, "description", ""),
+                    getattr(iface, "network_name", ""),
+                    getattr(iface, "guid", ""),
+                    str(iface),
+                ]
+                if any(str(value).casefold() == target_cf for value in candidates if value):
+                    self.resolved_interface = getattr(iface, "name", target)
+                    return iface
+
+            for iface in interfaces:
+                candidates = [
+                    getattr(iface, "name", ""),
+                    getattr(iface, "description", ""),
+                    getattr(iface, "network_name", ""),
+                    str(iface),
+                ]
+                if any(target_cf in str(value).casefold() for value in candidates if value):
+                    self.resolved_interface = getattr(iface, "name", target)
+                    return iface
+        except Exception as e:
+            logger.warning(f"Could not resolve Windows capture interface '{target}': {e}")
+
+        self.resolved_interface = target
+        return target
+
     def _sniff_loop(self):
         try:
             from scapy.all import sniff, conf
             conf.verb = 0   # suppress Scapy banners
+            iface = self._resolve_interface()
 
             def _pkt_handler(pkt):
                 if not self._running:
@@ -484,7 +553,7 @@ class PacketSniffer:
                 self._aggregator.ingest(pkt)
 
             sniff(
-                iface=self._interface,
+                iface=iface,
                 filter=self._filter,
                 prn=_pkt_handler,
                 store=False,
@@ -495,15 +564,21 @@ class PacketSniffer:
                 "Scapy is not installed. "
                 "Run:  pip install scapy"
             )
+            self.error = "Scapy is not installed. Run: pip install scapy"
+            self._aggregator.stop(flush=False)
             self._running = False
         except PermissionError:
             logger.error(
                 "Packet capture requires root/admin privileges. "
                 "Run with sudo, or: sudo setcap cap_net_raw+ep $(which python3)"
             )
+            self.error = "Packet capture requires Administrator/root privileges."
+            self._aggregator.stop(flush=False)
             self._running = False
         except Exception as e:
             logger.error(f"Sniffer error: {e}")
+            self.error = str(e)
+            self._aggregator.stop(flush=False)
             self._running = False
 
     @property

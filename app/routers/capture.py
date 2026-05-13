@@ -137,6 +137,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
 
         asyncio.run_coroutine_threadsafe(_broadcast_live_update(result, meta), loop)
 
+    _state["sniffer_error"] = None
     sniffer = PacketSniffer(on_flow_complete=on_flow, interface=interface)
     sniffer.start()
     _state["sniffer"]        = sniffer
@@ -156,6 +157,7 @@ async def stop_capture(user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="No capture running")
 
     sniffer = _state.get("sniffer")
+    packets_captured = sniffer.packets_captured if sniffer else _state["packet_count"]
     if sniffer:
         sniffer.stop()
 
@@ -164,7 +166,7 @@ async def stop_capture(user=Depends(get_current_user)):
 
     return {
         "message":          "Capture stopped",
-        "packets_captured": _state["packet_count"],
+        "packets_captured": packets_captured,
         "anomalies_found":  _state["anomaly_count"],
     }
 
@@ -173,12 +175,25 @@ async def stop_capture(user=Depends(get_current_user)):
 async def capture_status(user=Depends(get_current_user)):
     """Return current capture status and live counters."""
     sniffer = _state.get("sniffer")
+    sniffer_error = getattr(sniffer, "error", None) if sniffer else _state.get("sniffer_error")
+    if sniffer_error:
+        _state["sniffer_error"] = sniffer_error
+
+    active = bool(_state["capture_active"])
+    if sniffer and active and not sniffer.is_running:
+        active = False
+        _state["capture_active"] = False
+
+    sniffer_packets = sniffer.packets_captured if sniffer else 0
     return {
-        "active":           _state["capture_active"],
-        "packets_captured": _state["packet_count"],
+        "active":           active,
+        "packets_captured": sniffer_packets if sniffer else _state["packet_count"],
         "anomalies_found":  _state["anomaly_count"],
+        "flows_completed":  _state["flows_completed"],
         "ws_clients":       len(_state["ws_clients"]),
-        "sniffer_packets":  sniffer.packets_captured if sniffer else 0,
+        "sniffer_packets":  sniffer_packets,
+        "sniffer_error":    _state.get("sniffer_error"),
+        "interface":        getattr(sniffer, "resolved_interface", None) or "default",
     }
 
 

@@ -24,6 +24,18 @@ export async function login(username, password) {
   return res.json();
 }
 
+export async function getCurrentUser() {
+  return apiFetch('/api/auth/me');
+}
+
+export async function updateCurrentUserProfile(profile) {
+  return apiFetch('/api/auth/me/profile', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+}
+
 // ── Dashboard / System ────────────────────────────────────────
 export async function getSystemStatus()  { return apiFetch('/api/system/status'); }
 export async function getDashboardStats(){ return apiFetch('/api/dashboard/stats'); }
@@ -81,8 +93,8 @@ export async function getTrainingResult() { return apiFetch('/api/train/result')
 export async function detectFromFile(file, limit) {
   const form = new FormData();
   form.append('file', file);
-  if (limit) form.append('limit', String(limit));
-  const res = await fetch('/api/detect', {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : '';
+  const res = await fetch(`/api/detect${query}`, {
     method: 'POST',
     headers: authHeader(),
     body: form,
@@ -99,11 +111,8 @@ export async function getCaptureStatus() { return apiFetch('/api/capture/status'
 export async function getChartData()     { return apiFetch('/api/capture/chartdata'); }
 
 export async function startCapture(iface) {
-  return apiFetch('/api/capture/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ interface: iface }),
-  });
+  const query = iface ? `?interface=${encodeURIComponent(iface)}` : '';
+  return apiFetch(`/api/capture/start${query}`, { method: 'POST' });
 }
 export async function stopCapture() {
   return apiFetch('/api/capture/stop', { method: 'POST' });

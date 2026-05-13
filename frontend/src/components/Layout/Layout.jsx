@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useApp } from '../../hooks/useApp';
 import Sidebar from './Sidebar';
@@ -8,6 +8,7 @@ import './Layout.css';
 export default function Layout() {
   const { isAuthenticated } = useAuth();
   const { systemStatus } = useApp();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,8 +20,8 @@ export default function Layout() {
   const isReady = systemStatus?.models_ready;
 
   return (
-    <div className="app-layout">
-      <Sidebar />
+    <div className={`app-layout ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen((open) => !open)} />
       <main className="main-content">
         <div className="top-status-bar">
           <div className="status-item">

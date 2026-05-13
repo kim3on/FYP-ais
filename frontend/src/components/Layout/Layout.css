@@ -1,6 +1,7 @@
 .app-layout {
   display: flex;
   min-height: 100vh;
+  --sidebar-collapsed-w: 64px;
 }
 
 .main-content {
@@ -10,20 +11,25 @@
   background: var(--bg-base);
   overflow-y: auto;
   position: relative;
+  transition: margin-left var(--transition);
+}
+
+.app-layout.sidebar-closed .main-content {
+  margin-left: var(--sidebar-collapsed-w);
 }
 
 /* Top right status bar */
 .top-status-bar {
-  position: absolute;
-  top: 16px;
-  right: 24px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 16px;
+  min-height: 48px;
+  padding: 14px 24px 4px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  z-index: 10;
 }
 .top-status-bar .status-item {
   display: flex;
@@ -36,7 +42,7 @@
 
 /* Page wrapper used inside every page component */
 .page {
-  padding: 24px;
+  padding: 12px 24px 24px;
   animation: fadeIn 0.18s ease;
 }
 
@@ -75,4 +81,8 @@
 
 @media (max-width: 900px) {
   .two-col { grid-template-columns: 1fr; }
+
+  .top-status-bar {
+    justify-content: flex-start;
+  }
 }

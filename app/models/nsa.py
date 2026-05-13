@@ -91,6 +91,7 @@ class NegativeSelectionDetector:
         self.random_state = random_state
         self.confidence_threshold = confidence_threshold
         self.auto_threshold = auto_threshold
+        self.target_fpr = 0.01
 
         # Fitted state
         self.detectors_: np.ndarray | None = None
@@ -102,6 +103,9 @@ class NegativeSelectionDetector:
         self.n_features_: int | None = None
         self.is_fitted_: bool = False
         self.meta_: dict = {}
+        self.score_threshold_: float | None = None
+        self.score_scale_: float | None = None
+        self.calibration_: dict = {}
 
         # Detector aging — tracks staleness per detector
         self._det_match_counts_: np.ndarray | None = None   # lifetime match count
@@ -147,8 +151,10 @@ class NegativeSelectionDetector:
             sorted_dists = np.sort(dist_matrix, axis=1)
             nn_dists = sorted_dists[:, 1] if sorted_dists.shape[1] > 1 else sorted_dists[:, 0]
 
-            # Dynamic r (Self-Gap Threshold): 99.9th percentile of all pairwise distances
-            self.r = max(float(np.percentile(dist_matrix, 99.9)), 0.05)
+            # Dynamic r (Self-Gap Threshold): conservative nearest-neighbor boundary.
+            # Final classification uses score_threshold_, calibrated only on benign
+            # holdout rows by TrainingPipeline.
+            self.r = max(float(np.percentile(nn_dists, 99.0)), 0.05)
             
             # Dynamic r_s (Self-Tolerance): 99.0th percentile of nearest-neighbor distances
             self.r_s = max(float(np.percentile(nn_dists, 99.0)), 0.01)
@@ -254,9 +260,57 @@ class NegativeSelectionDetector:
             "auto_threshold": self.auto_threshold,
             "r_fitted": round(self.r, 6),
             "r_s_fitted": round(self.r_s, 6),
+            "score_threshold": self.score_threshold_,
+            "target_fpr": self.target_fpr,
+            "calibration": self.calibration_,
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
         return self
+
+    def calibrate_threshold(
+        self,
+        X_benign: np.ndarray,
+        target_fpr: float = 0.01,
+    ) -> dict:
+        """
+        Calibrate the final anomaly threshold from benign rows only.
+
+        target_fpr=0.01 means the threshold is set at the 99th percentile of
+        benign calibration scores, so roughly 1% of benign calibration rows are
+        allowed to be flagged as anomalies.
+        """
+        self._check_fitted()
+        if len(X_benign) == 0:
+            raise ValueError("Cannot calibrate NSA threshold without benign calibration rows")
+
+        target_fpr = float(np.clip(target_fpr, 0.0001, 0.5))
+        scores = self.anomaly_scores(X_benign)
+        threshold = float(np.quantile(scores, 1.0 - target_fpr))
+        threshold = max(threshold, 1e-9)
+        observed_fpr = float((scores > threshold).mean())
+
+        high = float(np.quantile(scores, 0.999))
+        self.score_threshold_ = threshold
+        self.score_scale_ = max(high, threshold * 1.5, threshold + 1e-9)
+        self.target_fpr = target_fpr
+        self.calibration_ = {
+            "mode": "unsupervised_benign",
+            "target_fpr": round(target_fpr, 6),
+            "observed_fpr": round(observed_fpr, 6),
+            "normal_pass_rate": round(1.0 - observed_fpr, 6),
+            "threshold": round(threshold, 6),
+            "score_scale": round(self.score_scale_, 6),
+            "n_calibration_samples": int(len(scores)),
+            "score_min": round(float(scores.min()), 6),
+            "score_median": round(float(np.median(scores)), 6),
+            "score_p95": round(float(np.quantile(scores, 0.95)), 6),
+            "score_p99": round(float(np.quantile(scores, 0.99)), 6),
+            "score_max": round(float(scores.max()), 6),
+        }
+        self.meta_["score_threshold"] = self.score_threshold_
+        self.meta_["target_fpr"] = self.target_fpr
+        self.meta_["calibration"] = self.calibration_
+        return self.calibration_
 
     # ------------------------------------------------------------------ #
     #  DETECTION — True NSA: Detector-primary classification               #
@@ -279,10 +333,9 @@ class NegativeSelectionDetector:
         A sample is flagged if EITHER condition is true.
         """
         self._check_fitted()
-        det_matched, _ = self._check_detector_match(X)
-        dist_to_self = self._min_dist_to_self(X)
-        self_gap = dist_to_self > self.r
-        return (det_matched | self_gap).astype(int)
+        scores = self.anomaly_scores(X)
+        threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
+        return (scores > threshold).astype(int)
 
     def predict_with_scores(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -296,27 +349,13 @@ class NegativeSelectionDetector:
         - Both            → takes the maximum of the two signals.
         """
         self._check_fitted()
-        det_matched, det_scores = self._check_detector_match(X)
-        det_matched = det_matched & (det_scores >= getattr(self, "confidence_threshold", 0.0))
-        dist_to_self = self._min_dist_to_self(X)
-        self_gap = dist_to_self > self.r
-
-        labels = (det_matched | self_gap).astype(int)
-
-        # Self-gap score: ramps 0→1 as distance goes from r to 1.0
-        gap_scores = np.clip(
-            (dist_to_self - self.r) / max(1.0 - self.r, 1e-9), 0.0, 1.0
-        )
-
-        # Detector score: boost to 0.5–1.0 range (specific antibody match
-        # always implies at least medium confidence)
-        boosted_det = np.where(det_matched, 0.5 + 0.5 * det_scores, 0.0)
-
-        final_scores = np.maximum(gap_scores, boosted_det)
-        # Normal samples should have score 0
-        final_scores = np.where(labels == 1, final_scores, 0.0)
-
-        return labels, final_scores.round(4)
+        raw_scores = self.anomaly_scores(X)
+        threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
+        labels = (raw_scores > threshold).astype(int)
+        scale = max(float(self.score_scale_ or threshold * 1.5), threshold + 1e-9)
+        confidence = np.clip((raw_scores - threshold) / max(scale - threshold, 1e-9), 0.0, 1.0)
+        confidence = np.where(labels == 1, confidence, 0.0)
+        return labels, confidence.round(4)
 
     def predict_with_details(
         self, X: np.ndarray
@@ -325,21 +364,21 @@ class NegativeSelectionDetector:
         Returns (labels, confidence_scores, dist_to_self).
         """
         self._check_fitted()
-        det_matched, det_scores = self._check_detector_match(X)
-        det_matched = det_matched & (det_scores >= getattr(self, "confidence_threshold", 0.0))
+        labels, scores = self.predict_with_scores(X)
         dist_to_self = self._min_dist_to_self(X)
-        self_gap = dist_to_self > self.r
+        return labels, scores, dist_to_self
 
-        labels = (det_matched | self_gap).astype(int)
-
-        gap_scores = np.clip(
-            (dist_to_self - self.r) / max(1.0 - self.r, 1e-9), 0.0, 1.0
+    def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
+        """Continuous unsupervised anomaly evidence used for calibration."""
+        self._check_fitted()
+        _, det_scores = self._check_detector_match(X)
+        det_scores = np.where(
+            det_scores >= getattr(self, "confidence_threshold", 0.0),
+            det_scores,
+            0.0,
         )
-        boosted_det = np.where(det_matched, 0.5 + 0.5 * det_scores, 0.0)
-        scores = np.maximum(gap_scores, boosted_det)
-        scores = np.where(labels == 1, scores, 0.0)
-
-        return labels, scores.round(4), dist_to_self
+        dist_to_self = self._min_dist_to_self(X)
+        return dist_to_self + det_scores
 
     # ------------------------------------------------------------------ #
     #  V-DETECTOR MATCHING                                                 #
@@ -565,6 +604,9 @@ class NegativeSelectionDetector:
         return {
             "status": "fitted",
             **self.meta_,
+            "score_threshold": self.score_threshold_,
+            "target_fpr": self.target_fpr,
+            "calibration": self.calibration_,
             "active_antibodies": int(len(self.detectors_)) if self.detectors_ is not None else 0,
         }
 

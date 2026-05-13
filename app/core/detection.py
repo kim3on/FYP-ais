@@ -16,7 +16,13 @@ from typing import Optional
 import uuid
 
 from app.core.preprocessor import CICIDSPreprocessor
-from app.core.evaluator import severity_from_score
+from app.core.evaluator import (
+    METRIC_EXPLANATIONS,
+    compute_silhouette_metric,
+    evaluate_model,
+    severity_from_score,
+    threshold_analysis,
+)
 
 
 @dataclass
@@ -104,7 +110,15 @@ class DetectionEngine:
             labels, scores = self.model.predict_with_scores(X_scaled)
             min_dists = None
 
-        return self._build_result(labels, scores, df, min_dists=min_dists)
+        raw_scores = self._raw_anomaly_scores(X_scaled, scores)
+        return self._build_result(
+            labels,
+            scores,
+            df,
+            min_dists=min_dists,
+            raw_scores=raw_scores,
+            features=X_scaled,
+        )
 
     # ------------------------------------------------------------------ #
     #  REAL-TIME DETECTION (single sample or small batch)                  #
@@ -122,7 +136,15 @@ class DetectionEngine:
         else:
             labels, scores = self.model.predict_with_scores(X_scaled)
             min_dists = None
-        return self._build_result(labels, scores, df_single, min_dists=min_dists)
+        raw_scores = self._raw_anomaly_scores(X_scaled, scores)
+        return self._build_result(
+            labels,
+            scores,
+            df_single,
+            min_dists=min_dists,
+            raw_scores=raw_scores,
+            features=X_scaled,
+        )
 
     # ------------------------------------------------------------------ #
     #  INTERNAL                                                            #
@@ -134,6 +156,8 @@ class DetectionEngine:
         scores: np.ndarray,
         df: pd.DataFrame,
         min_dists: Optional[np.ndarray] = None,
+        raw_scores: Optional[np.ndarray] = None,
+        features: Optional[np.ndarray] = None,
     ) -> dict:
         """Convert raw predictions to structured result with alert objects."""
         alerts = []
@@ -180,8 +204,9 @@ class DetectionEngine:
         total = len(labels)
         n_anomalies = int(labels.sum())
         n_zero_day  = sum(1 for a in alerts if a.get('is_zero_day'))
+        silhouette = compute_silhouette_metric(features, labels) if features is not None else None
 
-        return {
+        result = {
             "total_checked":      total,
             "anomalies_found":    n_anomalies,
             "normal_count":       total - n_anomalies,
@@ -191,7 +216,66 @@ class DetectionEngine:
             "severity_counts":    self._count_severities(alerts),
             "model_used":         self.active_model,
             "analysed_at":        datetime.now(timezone.utc).isoformat(),
+            "metric_explanations": METRIC_EXPLANATIONS,
         }
+        if silhouette is not None:
+            result["unsupervised_validation"] = {
+                "silhouette": silhouette,
+                "silhouette_score": silhouette["value"],
+                "explanation": METRIC_EXPLANATIONS["silhouette_score"],
+            }
+            result["silhouette_score"] = silhouette["value"]
+
+        result.update(self._labelled_metrics(labels, df, raw_scores=raw_scores))
+        return result
+
+    def _labelled_metrics(
+        self,
+        labels: np.ndarray,
+        df: pd.DataFrame,
+        raw_scores: Optional[np.ndarray] = None,
+    ) -> dict:
+        """Return classification metrics when uploaded detection data has labels."""
+        if "attack_category" not in df.columns or len(df) != len(labels):
+            return {}
+
+        categories = df["attack_category"].fillna("Unknown").astype(str)
+        if categories.str.lower().eq("unknown").all():
+            return {}
+
+        y_true = categories.str.lower().ne("normal").astype(int).to_numpy()
+        metrics = evaluate_model(
+            y_true,
+            labels.astype(int),
+            f"{self.active_model} detection",
+            df,
+        ).to_dict()
+        metrics["verification_mode"] = "post_run_labelled_verification"
+        metrics["verification_note"] = (
+            "Labels were used only after unsupervised detection to score predictions."
+        )
+        if raw_scores is not None and len(raw_scores) == len(labels):
+            metrics["threshold_analysis"] = threshold_analysis(
+                y_true,
+                raw_scores,
+                model_name=f"{self.active_model} threshold analysis",
+            )
+        return metrics
+
+    def _raw_anomaly_scores(self, X_scaled: np.ndarray, confidence_scores: np.ndarray) -> np.ndarray:
+        """
+        Return raw monotonic anomaly scores for threshold analysis when available.
+
+        For NSA this uses the model's existing anomaly_scores method. For models
+        without raw scoring, the normalized confidence score is still monotonic:
+        higher means more anomalous.
+        """
+        if hasattr(self.model, "anomaly_scores"):
+            try:
+                return np.asarray(self.model.anomaly_scores(X_scaled), dtype=float)
+            except Exception:
+                pass
+        return np.asarray(confidence_scores, dtype=float)
 
     def _infer_attack_type(self, row, category: str, novelty_score: float = 0.0) -> str:
         """Two-stage attack type classifier.

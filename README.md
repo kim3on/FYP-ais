@@ -206,7 +206,7 @@ GET  /health                   → { status: "ok", version: "4.0.0" }
 | `max_attempts`   | 30,000  | Max random candidates tried during training. |
 | `contamination`  | 0.05    | IsoForest: expected fraction of attacks in training data. |
 | `test_size`      | 0.2     | Fraction held out for test-set evaluation. |
-| `n_pca_components` | 0.95 | PCA target variance/components. Default keeps enough components for 95% explained variance. |
+| `n_pca_components` | 25 via `/api/train` | PCA component count for API training. The lower-level preprocessor also supports variance targets such as `0.95` when instantiated directly. |
 
 Current preprocessing flow:
 

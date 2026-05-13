@@ -13,6 +13,10 @@
 
 ---
 
+> **Current status (May 2026):** This is the original critical NSA audit. Several findings were later addressed by the V-Detector rewrite and the May 6 PCA-space update: `RobustScaler + PCA(whiten=True)`, dynamic `r`/`r_s` calibration from benign distances, detector generation without `[0,1]` clipping, and auto-threshold metadata. Older sections that discuss MinMax-only `[0,1]` geometry are historical context.
+
+---
+
 ## Verdict Summary
 
 | # | Audit Dimension | Verdict | Severity |

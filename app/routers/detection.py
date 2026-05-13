@@ -9,7 +9,7 @@ POST /api/detect/sample      — detect anomaly in a single JSON flow
 
 import traceback
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, Depends
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, Depends
 from typing import Optional
 from datetime import datetime
 
@@ -29,6 +29,7 @@ async def detect(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     limit: Optional[int] = None,
+    limit_form: Optional[int] = Form(None, alias="limit"),
 ):
     """
     Upload a network log (CSV or Parquet) and run batch anomaly detection
@@ -50,7 +51,8 @@ async def detect(
     _state["detect_logs"]        = []
     _state["last_detect_result"] = None
 
-    _limit = int(limit) if limit else None
+    raw_limit = limit if limit is not None else limit_form
+    _limit = int(raw_limit) if raw_limit else None
 
     def dlog(msg: str):
         ts = datetime.now().strftime("%H:%M:%S")

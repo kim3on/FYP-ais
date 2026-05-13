@@ -29,24 +29,36 @@ const NAV = [
   { to: '/accessibility',  icon: <AccessibilityIcon />, label: 'Accessibility'  },
 ];
 
-export default function Sidebar() {
-  const { user, logout }        = useAuth();
+export default function Sidebar({ isOpen, onToggle }) {
+  const { currentUser, user, logout } = useAuth();
   const { alerts, theme, setTheme } = useApp();
   const unread = alerts.filter(a => !a.is_false_positive).length;
+  const displayName = currentUser?.profile?.display_name || currentUser?.username || user || 'Admin';
+  const role = currentUser?.role || 'Network Admin';
 
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'open' : 'closed'}`}>
       {/* Logo */}
       <div className="sidebar-logo">
         <span className="logo-icon"><LogoIcon /></span>
-        <div>
+        <div className="logo-text">
           <div className="logo-title">AIS-Detect</div>
           <div className="logo-sub">Immune System IDS</div>
         </div>
+        <button
+          className="btn btn-ghost btn-sm sidebar-toggle"
+          type="button"
+          onClick={onToggle}
+          title={isOpen ? 'Close sidebar' : 'Open sidebar'}
+          aria-label={isOpen ? 'Close sidebar' : 'Open sidebar'}
+          aria-expanded={isOpen}
+        >
+          {isOpen ? '<' : '>'}
+        </button>
       </div>
 
       {/* Nav links */}
@@ -57,6 +69,7 @@ export default function Sidebar() {
             to={to}
             end={to === '/'}
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            title={!isOpen ? label : undefined}
           >
             <span className="nav-icon">{icon}</span>
             <span className="nav-label">{label}</span>
@@ -69,11 +82,11 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="sidebar-footer">
-        <NavLink to="/account" className="sidebar-user" style={{ textDecoration: 'none' }}>
-          <span className="user-avatar">{user?.[0]?.toUpperCase() ?? 'A'}</span>
-          <div>
-            <div className="user-name">{user ?? 'Admin'}</div>
-            <div className="user-role">Network Admin</div>
+        <NavLink to="/account" className="sidebar-user" style={{ textDecoration: 'none' }} title={!isOpen ? 'Account' : undefined}>
+          <span className="user-avatar">{displayName?.[0]?.toUpperCase() ?? 'A'}</span>
+          <div className="user-meta">
+            <div className="user-name">{displayName}</div>
+            <div className="user-role">{role}</div>
           </div>
         </NavLink>
         <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Theme" style={{marginRight: '4px'}}>

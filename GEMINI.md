@@ -7,7 +7,7 @@ This file provides foundational context and instructions for AI agents working o
 
 ### Core Stack
 - **Backend:** FastAPI (Python 3.12+), SQLAlchemy (SQLite), Scapy (Packet Sniffing).
-- **Frontend:** React 19 (Vite), Chart.js (Real-time visualization), Tailwind CSS (Aesthetic: Cyber-Defense/Rosé Pine).
+- **Frontend:** React 19 (Vite), Chart.js (real-time visualization), CSS variables/custom styles (Cyber-Defense/Rosé Pine aesthetic).
 - **ML:** Scikit-learn (Isolation Forest baseline), Pandas, NumPy.
 
 ### Key Operating Modes
@@ -64,11 +64,12 @@ python validate_ml.py  # ML Statistical Integrity Auditor
 
 ### Security Mandates
 - **Auth:** All non-health endpoints require JWT authentication. Use `Depends(get_current_user)`.
-- **Passwords:** NEVER store or log plaintext passwords. Use `bcrypt` hashing via `passlib`.
+- **Passwords:** NEVER store or log plaintext passwords. Use the project bcrypt helpers in `app/routers/auth.py`.
 - **WebSockets:** Protect `/ws/live` by verifying tokens passed in the query string.
 
 ### Machine Learning Standards
 - **Leakage Prevention:** Always split data *before* fitting scalers or models.
+- **Preprocessing:** Current training uses `RobustScaler` followed by `PCA(whiten=True)`; do not reintroduce MinMax-only `[0,1]` assumptions in NSA space.
 - **NSA Training:** The Negative Selection Algorithm must train ONLY on "BENIGN" (Self) samples.
 - **Feature Extraction:** Maintain parity between the 77-feature extraction in `capture.py` and the `preprocessor.py` used for training.
 

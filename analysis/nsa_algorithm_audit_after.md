@@ -4,6 +4,8 @@
 > **Test Suite**: 28/28 passed  
 > **Date**: 2026-05-02
 
+> **May 2026 update:** The current implementation builds on this V-Detector rewrite with `RobustScaler + PCA(whiten=True)`, dynamic PCA-space `r`/`r_s` calibration, and detector generation without `[0,1]` clipping. The table below reflects the first V-Detector fix pass; use README/DATAFLOW for current runtime defaults.
+
 ---
 
 ## Summary of Changes
@@ -44,10 +46,10 @@ AFTER (True V-Detector NSA):
 
 | Parameter | Default | Role | Biological Analog |
 |-----------|---------|------|-------------------|
-| `r` | 0.3 | Self-gap detection threshold — triggers fallback when sample is far from all self | Innate immune response threshold |
-| `r_s` | `min(r×0.1, 0.05)` | Self-tolerance for negative selection — candidates within `r_s` of self are deleted | Thymus selection stringency |
-| `max_detectors` | 500 | Maximum mature V-detectors | T-cell repertoire size |
-| `max_attempts` | 10,000 | Candidate generation budget | Thymus throughput |
+| `r` | Auto-calibrated by default | Self-gap detection threshold — triggers fallback when sample is far from all self | Innate immune response threshold |
+| `r_s` | Auto-calibrated by default | Self-tolerance for negative selection — candidates within `r_s` of self are deleted | Thymus selection stringency |
+| `max_detectors` | 1,000 in the API endpoint | Maximum mature V-detectors | T-cell repertoire size |
+| `max_attempts` | 30,000 in the API endpoint | Candidate generation budget | Thymus throughput |
 
 ## New Test Coverage
 

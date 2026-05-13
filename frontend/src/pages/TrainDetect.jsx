@@ -56,20 +56,91 @@ function FileDropZone({ file, onFile, inputId, icon = '📂' }) {
 // ── Metrics grid ───────────────────────────────────────────────
 function MetricsGrid({ result }) {
   if (!result) return null;
+  const formatMetric = (label, value) => {
+    if (value == null) return '—';
+    const pct = value * 100;
+    if (/False (Pos|Neg)\. Rate/.test(label) && pct > 0 && pct < 0.01) return '<0.01%';
+    return `${pct.toFixed(/False (Pos|Neg)\. Rate/.test(label) ? 2 : 1)}%`;
+  };
   const rows = [
-    ['Accuracy', result.accuracy], ['Precision', result.precision],
-    ['Recall', result.recall],     ['F1 Score', result.f1],
+    ['Recall / TPR', result.true_positive_rate ?? result.recall],
+    ['False Neg. Rate', result.false_negative_rate],
     ['False Pos. Rate', result.false_positive_rate],
+    ['Precision', result.precision],
+    ['F1 Score', result.f1],
+    ['Accuracy (secondary)', result.accuracy],
   ].filter(([, v]) => v != null);
-  if (!rows.length) return null;
+  const unsupervisedRows = rows.length ? [] : [
+    ['Anomaly Rate', result.detection_rate_pct != null ? result.detection_rate_pct / 100 : null],
+    ['Normal Flows', result.normal_count, 'count'],
+    ['Anomalies', result.anomalies_found, 'count'],
+    ['Zero-Day Candidates', result.zero_day_candidates, 'count'],
+  ].filter(([, v]) => v != null);
+  const displayRows = rows.length ? rows : unsupervisedRows;
+  const counts = [
+    ['TP - Attacks Caught', result.tp],
+    ['FN - Attacks Missed', result.fn],
+    ['FP - False Alarms', result.fp],
+    ['TN - Normal Passed', result.tn],
+  ].filter(([, v]) => v != null);
+  if (!displayRows.length) return null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
-      {rows.map(([label, val]) => (
-        <div key={label} style={{ background: 'var(--bg-overlay)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
-          <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{label}</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{(val * 100).toFixed(1)}%</div>
+    <div className="td-model-metrics">
+      <div className="td-metric-grid">
+        {displayRows.map(([label, val, type]) => (
+          <div key={label} className="td-model-metric">
+            <div className="td-detail-label">{label}</div>
+            <div className="td-model-metric-value">{type === 'count' ? val.toLocaleString() : formatMetric(label, val)}</div>
+          </div>
+        ))}
+      </div>
+
+      {counts.length > 0 && (
+        <div className="td-confusion-grid">
+          {counts.map(([label, val]) => (
+            <div key={label} className="td-confusion-row">
+              <span>{label}</span>
+              <strong>{val.toLocaleString()}</strong>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+function ThresholdSummary({ analysis }) {
+  const rec = analysis?.recommended;
+  if (!analysis?.available || !rec) return null;
+  const pct = value => value != null ? `${(value * 100).toFixed(1)}%` : '—';
+  return (
+    <div className="td-threshold-summary">
+      <div className="td-section-label">Threshold Tradeoff Summary</div>
+      <div className="td-detail-note">
+        Report-only recommendation. It does not change the saved unsupervised model threshold.
+      </div>
+      <div className="td-detail-metrics">
+        <div className="td-detail-metric">
+          <div className="td-detail-label">Recommended Threshold</div>
+          <div className="td-detail-value">{rec.threshold?.toFixed ? rec.threshold.toFixed(4) : rec.threshold}</div>
+        </div>
+        <div className="td-detail-metric">
+          <div className="td-detail-label">Recall / TPR</div>
+          <div className="td-detail-value" style={{ color: 'var(--success)' }}>{pct(rec.recall)}</div>
+        </div>
+        <div className="td-detail-metric">
+          <div className="td-detail-label">FNR</div>
+          <div className="td-detail-value" style={{ color: 'var(--danger)' }}>{pct(rec.false_negative_rate)}</div>
+        </div>
+        <div className="td-detail-metric">
+          <div className="td-detail-label">FPR</div>
+          <div className="td-detail-value" style={{ color: 'var(--warning)' }}>{pct(rec.false_positive_rate)}</div>
+        </div>
+      </div>
+      <p className="td-detail-note" style={{ marginTop: '8px' }}>
+        {analysis.target_achieved ? 'Target achieved: ' : 'Best tradeoff found: '}
+        {analysis.recommendation_reason}
+      </p>
     </div>
   );
 }
@@ -311,7 +382,7 @@ function DetectionTab() {
             <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
               <div className="stat-card">
                 <div className="stat-label">Total Flows</div>
-                <div className="stat-value">{result.total_flows ?? alerts.length}</div>
+                <div className="stat-value">{result.total_checked ?? result.total_flows ?? alerts.length}</div>
               </div>
               <div className="stat-card" style={{ borderColor: anomCount > 0 ? 'var(--danger-border)' : 'var(--border)' }}>
                 <div className="stat-label" style={{ color: 'var(--danger)' }}>Anomalies</div>
@@ -325,9 +396,20 @@ function DetectionTab() {
               )}
             </div>
             <div className="card">
-              <div className="td-section-label">Model Metrics</div>
+              <div className="td-section-label">
+                {result.accuracy != null ? 'Post-run Labelled Verification' : 'Unsupervised Detection Summary'}
+              </div>
               <MetricsGrid result={result} />
-              {!result.accuracy && <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '8px' }}>Metrics available when dataset contains a Label column</p>}
+              <ThresholdSummary analysis={result.threshold_analysis} />
+              {result.accuracy != null ? (
+                <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                  Verification only: labels were used after detection to score the unsupervised output.
+                </p>
+              ) : (
+                <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                  Labelled verification appears only when the uploaded detection file contains a Label column.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -351,8 +433,8 @@ function GlobalTrainingResult() {
   const { trainResult, trainFile } = useApp();
   if (!trainResult) return null;
 
+  const formatPercent = (value, digits = 1) => (value != null ? `${(value * 100).toFixed(digits)}%` : '—');
   const detectors = trainResult.nsa_summary?.mature_detectors ?? 0;
-  const accuracy = trainResult.nsa_eval?.accuracy != null ? (trainResult.nsa_eval.accuracy * 100).toFixed(1) + '%' : '—';
   const samples = trainResult.nsa_summary?.n_self_samples ?? 0;
   
   let datasetName;
@@ -365,12 +447,24 @@ function GlobalTrainingResult() {
   }
 
   const eval_ = trainResult.nsa_eval || {};
+  const calibration = trainResult.calibration_summary || trainResult.nsa_summary?.calibration || {};
+  const targetFpr = calibration.target_fpr ?? trainResult.nsa_summary?.target_fpr;
+  const observedFpr = calibration.observed_fpr ?? eval_.false_positive_rate;
+  const selfIntrusionRate = trainResult.ais_metrics?.self_intrusion_rate ?? eval_.self_intrusion_rate;
+  const silhouette = trainResult.unsupervised_validation?.silhouette ?? eval_.silhouette;
+  const normalPassRate = calibration.normal_pass_rate ?? (1 - (observedFpr ?? 0));
+  const accuracyTitle = 'Unsupervised Benign Calibration';
+  const accuracyValue = formatPercent(normalPassRate, 2);
+  const accuracySubtitle = 'Held-Out BENIGN Calibration';
   const detailMetrics = [
-    ['Precision',     eval_.precision     != null ? (eval_.precision     * 100).toFixed(1) + '%' : '—', 'var(--success)'],
-    ['Recall',        eval_.recall        != null ? (eval_.recall        * 100).toFixed(1) + '%' : '—', 'var(--success)'],
-    ['F1 Score',      eval_.f1            != null ? (eval_.f1            * 100).toFixed(1) + '%' : '—', 'var(--success)'],
-    ['False Pos. Rate', eval_.false_positive_rate != null ? (eval_.false_positive_rate * 100).toFixed(1) + '%' : '—', 'var(--warning)'],
+    ['Target FPR', formatPercent(targetFpr, 2), 'var(--accent)'],
+    ['Observed Benign FPR', formatPercent(observedFpr, 2), 'var(--warning)'],
+    ['Self Intrusion Rate', formatPercent(selfIntrusionRate, 2), 'var(--danger)'],
+    ['Normal Pass Rate', formatPercent(normalPassRate, 2), 'var(--success)'],
+    ['Silhouette Score', silhouette?.value != null ? silhouette.value.toFixed(3) : 'N/A', 'var(--iris)'],
+    ['Threshold', calibration.threshold != null ? calibration.threshold.toFixed(4) : '—', 'var(--text-primary)'],
   ].filter(([, v]) => v !== '—');
+  const metricsNote = 'Fully unsupervised: only BENIGN traffic is used to fit the scaler, train AIS detectors, and calibrate the threshold. Attack labels are not used for training.';
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -390,13 +484,13 @@ function GlobalTrainingResult() {
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
-            <SummaryIcon src={chartArrowRiseIcon} alt="" tone="success" /> Training Accuracy
+            <SummaryIcon src={chartArrowRiseIcon} alt="" tone="success" /> {accuracyTitle}
           </div>
           <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', fontFamily: "'JetBrains Mono', monospace" }}>
-            {accuracy}
+            {accuracyValue}
           </div>
           <div style={{ fontSize: '10px', color: 'var(--success)', fontFamily: "'JetBrains Mono', monospace" }}>
-            Baseline vs Validation Set
+            {accuracySubtitle}
           </div>
         </div>
 
@@ -415,13 +509,16 @@ function GlobalTrainingResult() {
 
       {/* ── Compact detail metrics ── */}
       {detailMetrics.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '8px' }}>
-          {detailMetrics.map(([label, val, color]) => (
-            <div key={label} style={{ background: 'var(--bg-overlay)', borderRadius: 'var(--radius)', padding: '6px 12px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '8px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '2px' }}>{label}</div>
-              <div style={{ fontSize: '11px', fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color }}>{typeof val === 'number' ? val.toLocaleString() : val}</div>
-            </div>
-          ))}
+        <div className="td-detail-panel">
+          <div className="td-detail-note">{metricsNote}</div>
+          <div className="td-detail-metrics">
+            {detailMetrics.map(([label, val, color]) => (
+              <div key={label} className="td-detail-metric">
+                <div className="td-detail-label">{label}</div>
+                <div className="td-detail-value" style={{ color }}>{val}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -437,7 +534,7 @@ export default function TrainDetect() {
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">Train & Detect</h1>
-        <p className="page-subtitle">Train the NSA Self profile · Run batch anomaly detection</p>
+        <p className="page-subtitle">Train an unsupervised NSA self profile · Run batch anomaly detection</p>
       </div>
 
       <GlobalTrainingResult />
