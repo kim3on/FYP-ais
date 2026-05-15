@@ -159,7 +159,7 @@ from app.core.preprocessor import CICIDSPreprocessor
 def test_load_and_label():
     csv = _make_cicids_csv(60, 20)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     assert prep.is_fitted_
     assert X_normal.ndim == 2
     assert len(y) == 80
@@ -167,11 +167,21 @@ def test_load_and_label():
     assert (y == 0).sum() == 60
     assert (y == 1).sum() == 20
 
+def test_mixed_fit_transform_requires_explicit_unsafe():
+    csv = _make_cicids_csv(60, 20)
+    prep = CICIDSPreprocessor()
+    try:
+        prep.fit_transform(csv)
+    except ValueError as exc:
+        assert "Unsafe mixed labelled fit_transform" in str(exc)
+    else:
+        raise AssertionError("Mixed labelled fit_transform should require explicit unsafe opt-in")
+
 def test_no_inf_nan_after_clean():
     """Real CICFlowMeter CSVs contain 'Inf' strings — must be cleaned."""
     csv = _make_cicids_csv(50, 10, inject_inf=True)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     assert not np.any(np.isnan(X_normal)), "NaN found in output"
     assert not np.any(np.isinf(X_normal)), "Inf found in output"
 
@@ -180,7 +190,7 @@ def test_normalised_to_0_1():
     We verify the data is finite and has reasonable spread instead."""
     csv = _make_cicids_csv(80, 20)
     prep = CICIDSPreprocessor(n_pca_components=None)
-    X_normal, _, _ = prep.fit_transform(csv)
+    X_normal, _, _ = prep.fit_transform_unsafe_single_dataset(csv)
     assert np.isfinite(X_normal).all(), "Non-finite values found after scaling"
     # RobustScaler centres at median; values must not ALL be zero (i.e. scaler is active)
     assert X_normal.std() > 0, "Scaler produced all-zero variance — scaler not applied"
@@ -189,7 +199,7 @@ def test_duplicate_col_removed():
     """'Fwd Header Length.1' duplicate should be removed."""
     csv = _make_cicids_csv(40, 10)
     prep = CICIDSPreprocessor()
-    prep.fit_transform(csv)
+    prep.fit_transform_unsafe_single_dataset(csv)
     dups = [c for c in prep.feature_columns_ if prep.feature_columns_.count(c) > 1]
     assert len(dups) == 0, f"Duplicate columns found: {dups}"
 
@@ -197,13 +207,13 @@ def test_leading_space_label():
     """The ' Label' column (leading space) must be found and stripped."""
     csv = _make_cicids_csv(30, 10)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     assert 'attack_category' in df.columns
 
 def test_attack_categories():
     csv = _make_cicids_csv(60, 30)
     prep = CICIDSPreprocessor()
-    _, y, df = prep.fit_transform(csv)
+    _, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     cats = set(df['attack_category'].unique())
     assert 'normal' in cats
     # Should have at least DoS and DDoS categories
@@ -212,7 +222,7 @@ def test_attack_categories():
 def test_validation_stats():
     csv = _make_cicids_csv(80, 20)
     prep = CICIDSPreprocessor()
-    _, y, df = prep.fit_transform(csv)
+    _, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     stats = prep.validation_stats(y, df)
     assert stats['total_records']  == 100
     assert stats['normal_records'] == 80
@@ -225,7 +235,7 @@ def test_inference_alignment():
     csv_train = _make_cicids_csv(60, 20)
     csv_test  = _make_cicids_csv(10, 5)
     prep = CICIDSPreprocessor()
-    prep.fit_transform(csv_train)
+    prep.fit_transform_unsafe_single_dataset(csv_train)
     X_new, _ = prep.transform(csv_test)
     expected_cols = prep.pca_.n_components_ if prep.pca_ is not None else len(prep.feature_columns_)
     assert X_new.shape[1] == expected_cols
@@ -236,7 +246,7 @@ def test_persistence():
     try:
         csv = _make_cicids_csv(50, 15)
         prep = CICIDSPreprocessor()
-        prep.fit_transform(csv)
+        prep.fit_transform_unsafe_single_dataset(csv)
         prep.save(path)
         prep2 = CICIDSPreprocessor.load(path)
         assert prep2.feature_columns_ == prep.feature_columns_
@@ -248,7 +258,7 @@ def test_benign_only_returns_no_normal_in_X_normal():
     """When dataset is all BENIGN, X_normal == X_all."""
     csv = _make_cicids_csv(50, 0)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     assert (y == 0).all()
     assert len(X_normal) == 50
 
@@ -256,12 +266,13 @@ def test_feature_count_reasonable():
     """CIC-IDS-2017 should produce ~75 numeric features after cleaning."""
     csv = _make_cicids_csv(40, 10)
     prep = CICIDSPreprocessor(n_pca_components=None)
-    prep.fit_transform(csv)
+    prep.fit_transform_unsafe_single_dataset(csv)
     n = len(prep.feature_columns_)
     assert 50 <= n <= 90, f"Unexpected feature count: {n}"
     print(f"\n    Feature count after cleaning: {n}")
 
 test("Preprocessor — load CSV, encode labels, split BENIGN/attack",  test_load_and_label)
+test("Preprocessor — mixed fit_transform requires unsafe opt-in",     test_mixed_fit_transform_requires_explicit_unsafe)
 test("Preprocessor — Inf strings cleaned to 0 (CICFlowMeter fix)",   test_no_inf_nan_after_clean)
 test("Preprocessor — output normalised to [0, 1]",                    test_normalised_to_0_1)
 test("Preprocessor — duplicate 'Fwd Header Length.1' removed",        test_duplicate_col_removed)
@@ -283,7 +294,7 @@ def test_nsa_on_cicids_features():
     """NSA must train on the ~75 numerical features from CIC-IDS-2017."""
     csv = _make_cicids_csv(100, 30)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=50,
                                     max_attempts=1000, random_state=1)
     nsa.fit(X_normal)
@@ -298,7 +309,7 @@ def test_nsa_on_cicids_features():
 def test_nsa_predict_shape():
     csv = _make_cicids_csv(80, 20)
     prep = CICIDSPreprocessor()
-    X_normal, _, _ = prep.fit_transform(csv)
+    X_normal, _, _ = prep.fit_transform_unsafe_single_dataset(csv)
     X_all, _ = prep.transform(_make_cicids_csv(20, 10))
     nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=50, max_attempts=1000)
     nsa.fit(X_normal)
@@ -310,7 +321,7 @@ def test_nsa_detectors_dont_match_self():
     """Core NSA property: no V-detector sphere should overlap with any self sample."""
     csv = _make_cicids_csv(60, 0)
     prep = CICIDSPreprocessor()
-    X_normal, _, _ = prep.fit_transform(csv)
+    X_normal, _, _ = prep.fit_transform_unsafe_single_dataset(csv)
     nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=40,
                                     max_attempts=1000, random_state=9)
     nsa.fit(X_normal)
@@ -336,7 +347,7 @@ from app.models.isolation_forest import IsolationForestDetector
 def test_iso_on_cicids():
     csv = _make_cicids_csv(100, 30)
     prep = CICIDSPreprocessor()
-    X_normal, y, _ = prep.fit_transform(csv)
+    X_normal, y, _ = prep.fit_transform_unsafe_single_dataset(csv)
     X_all, _ = prep.transform(_make_cicids_csv(20, 10))
     iso = IsolationForestDetector(contamination=0.1, random_state=2)
     iso.fit(X_normal)
@@ -351,12 +362,14 @@ test("IsoForest — fits and predicts on CIC-IDS-2017 features", test_iso_on_cic
 print("\n── 4. Evaluator ────────────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 from app.core.evaluator import evaluate_model, compare_models, severity_from_score
+from app.core.calibration import conformal_threshold
+from app.models.self_boundary import SelfBoundaryDetector
 
 def test_evaluator_cicids_categories():
     """Per-category stats should show CIC-IDS-2017 attack types."""
     csv = _make_cicids_csv(80, 30)
     prep = CICIDSPreprocessor()
-    X_normal, y, df = prep.fit_transform(csv)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
     # Simulate predictions (flag everything as attack for this test)
     y_pred = np.ones_like(y)
     result = evaluate_model(y, y_pred, "Test", df)
@@ -372,8 +385,45 @@ def test_severity_mapping():
     assert severity_from_score(0.60) == 'medium'
     assert severity_from_score(0.30) == 'low'
 
+def test_conformal_threshold_known_rank():
+    scores = np.array([0.0, 1.0, 2.0, 3.0])
+    info = conformal_threshold(scores, target_fpr=0.25)
+    assert info["rank_index"] == 4
+    assert info["threshold"] == 3.0
+    assert info["observed_fpr"] == 0.0
+    assert info["reliability"] == "experimental"
+
+def test_self_boundary_quantile_fences_and_strict_threshold():
+    df = pd.DataFrame({
+        "a": np.linspace(10.0, 20.0, 200),
+        "b": np.linspace(100.0, 200.0, 200),
+    })
+    sb = SelfBoundaryDetector()
+    sb.fit(df, ["a", "b"])
+    assert sb.summary()["boundary_mode"] == "quantile_fence"
+    sb.weighted_threshold_ = 0.0
+    _, flags_inside, _ = sb.score(pd.DataFrame({"a": [15.0], "b": [150.0]}))
+    _, flags_outside, _ = sb.score(pd.DataFrame({"a": [100.0], "b": [150.0]}))
+    assert not bool(flags_inside[0]), "Strict score > threshold should not flag zero-score rows"
+    assert bool(flags_outside[0]), "Out-of-fence sample should be flagged"
+
+def test_self_boundary_legacy_gaussian_compat():
+    sb = SelfBoundaryDetector()
+    sb.feature_names_ = ["a"]
+    sb.n_features_ = 1
+    sb.means_ = np.array([0.0])
+    sb.stds_ = np.array([1.0])
+    sb.feature_weights_ = np.array([1.0])
+    sb.is_fitted_ = True
+    score = sb.weighted_score(pd.DataFrame({"a": [10.0]}))
+    assert sb.summary()["boundary_mode"] == "gaussian_zscore_legacy"
+    assert score[0] > 0.0
+
 test("Evaluator — per-category stats with CIC-IDS-2017 labels", test_evaluator_cicids_categories)
 test("Evaluator — severity score thresholds correct",            test_severity_mapping)
+test("Calibration — conformal threshold rank is deterministic",  test_conformal_threshold_known_rank)
+test("Self-Boundary — quantile fences and strict threshold",      test_self_boundary_quantile_fences_and_strict_threshold)
+test("Self-Boundary — legacy Gaussian artifacts remain usable",   test_self_boundary_legacy_gaussian_compat)
 
 
 # ════════════════════════════════════════════════════════════
@@ -391,13 +441,21 @@ def test_pipeline_cicids():
 
     assert result['nsa_summary']['status']       == 'fitted'
     assert result['iso_summary']['status']       == 'fitted'
+    assert result['sb_summary']['status']        == 'fitted'
     assert result['validation_stats']['dataset'] == 'CIC-IDS-2017'
     assert result['validation_stats']['n_features'] > 0
 
     for key in ('accuracy', 'false_positive_rate'):
         assert 0.0 <= result['nsa_eval'][key] <= 1.0, \
             f"metric '{key}' out of range: {result['nsa_eval'][key]}"
-    assert result['validation_mode'] == 'unsupervised_benign_calibrated'
+    assert result['validation_mode'] == 'strict_unsupervised_benign_fusion_calibrated'
+    assert result['calibration_summary']['score_mode'] == 'weighted_fusion'
+    assert 'calibration_reliability' in result['calibration_summary']
+    assert 'calibration_reliability' in result['nsa_calibration_summary']
+    assert 'calibration_reliability' in result['self_boundary_calibration_summary']
+    assert 'fusion_calibration' in result['nsa_summary']
+    assert result['sb_summary']['score_mode'] == 'weighted_feature_violation'
+    assert result['sb_summary']['boundary_mode'] == 'quantile_fence'
     assert result['nsa_eval']['labelled_attack_metrics_applicable'] is False
     for key in ('precision', 'recall', 'f1', 'false_negative_rate', 'true_positive_rate'):
         assert result['nsa_eval'][key] is None, \
@@ -405,7 +463,12 @@ def test_pipeline_cicids():
     assert 0.0 <= result['ais_metrics']['self_intrusion_rate'] <= 1.0
     assert 'unsupervised_validation' in result
     assert 'silhouette' in result['unsupervised_validation']
+    assert 'source_decomposition' in result['unsupervised_validation']
     assert 'metric_explanations' in result
+    labelled = result['post_run_labelled_verification']
+    assert labelled['available'] is True
+    assert labelled['threshold_analysis']['verification_only'] is True
+    assert labelled['source_decomposition']['available'] is True
 
     n_feat = result['validation_stats']['n_features']
     n_ab   = result['nsa_summary']['mature_detectors']
@@ -436,7 +499,7 @@ test("Pipeline — result JSON persisted to disk",                  test_pipelin
 print("\n── 6. Detection Engine ─────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 from app.core.detection import DetectionEngine
-from app.core.pipeline import load_nsa, load_preprocessor
+from app.core.pipeline import load_nsa, load_preprocessor, load_self_boundary
 
 def test_detection_result_structure():
     """Detection should return correct keys and alert structure."""
@@ -447,9 +510,10 @@ def test_detection_result_structure():
 
     nsa  = load_nsa()
     prep = load_preprocessor()
-    assert nsa is not None and prep is not None
+    sb   = load_self_boundary()
+    assert nsa is not None and prep is not None and sb is not None
 
-    engine = DetectionEngine(nsa, prep, active_model='nsa')
+    engine = DetectionEngine(nsa, prep, active_model='nsa', self_boundary=sb)
     result = engine.detect_from_csv(_make_cicids_csv(n_benign=20, n_attack=10))
 
     assert result['total_checked'] == 30
@@ -463,6 +527,19 @@ def test_detection_result_structure():
     assert 'threshold_analysis' in result
     assert result['threshold_analysis']['verification_only'] is True
     assert 'recommended' in result['threshold_analysis']
+    assert result['source_decomposition']['available'] is True
+    assert 'self_boundary' in result['layer1_sources']
+    assert 'v_detector' in result['layer1_sources']
+    assert 'self_gap' in result['layer1_sources']
+    assert result['score_mode'] == 'weighted_fusion'
+
+    offset_result = engine.detect_from_csv(
+        _make_cicids_csv(n_benign=40, n_attack=20),
+        limit=10,
+        offset=20,
+    )
+    assert offset_result['total_checked'] == 10
+    assert offset_result['row_offset'] == 20
 
     print(f"\n    Detected {result['anomalies_found']} anomalies in 30 samples")
 
@@ -475,14 +552,16 @@ def test_detection_alert_fields():
 
     required = {'alert_id', 'timestamp', 'src_ip', 'dst_ip', 'dst_port',
                 'protocol', 'attack_type', 'severity', 'confidence',
-                'confidence_pct', 'is_false_positive'}
+                'confidence_pct', 'is_false_positive', 'anomaly_sources'}
     valid_sev = {'critical', 'high', 'medium', 'low'}
+    valid_sources = {'v_detector', 'self_gap', 'self_boundary', 'score_fusion', 'nsa_pca'}
 
     for alert in result['alerts']:
         missing = required - set(alert.keys())
         assert not missing, f"Alert missing fields: {missing}"
         assert alert['severity'] in valid_sev, f"Bad severity: {alert['severity']}"
         assert 0.0 <= alert['confidence'] <= 1.0
+        assert set(alert['anomaly_sources']).issubset(valid_sources)
 
 def test_detection_with_iso_model():
     """Detection engine should work with Isolation Forest too."""

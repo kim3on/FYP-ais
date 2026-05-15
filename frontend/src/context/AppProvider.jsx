@@ -17,7 +17,8 @@ export function AppProvider({ children }) {
 
   // Train/Detect persistence
   const [trainFile, setTrainFile]       = useState(null);
-  const [nDetectors, setND]             = useState(500);
+  const [nDetectors, setND]             = useState(1500);
+  const [benignRowLimit, setBenignRowLimit] = useState(20000);
   const [rRadius, setR]                 = useState(0.30);
   const [rsRadius, setRS]               = useState(0.03);
   const [trainLogs, setTrainLogs]       = useState([]);
@@ -25,6 +26,7 @@ export function AppProvider({ children }) {
 
   const [detectFile, setDetectFile]     = useState(null);
   const [detectLimit, setDetectLimit]   = useState(1000);
+  const [detectOffset, setDetectOffset] = useState(0);
   const [detectLogs, setDetectLogs]     = useState([]);
   const [detectResult, setDetectResult] = useState(null);
 
@@ -104,9 +106,9 @@ export function AppProvider({ children }) {
       activeModel, setActiveModel,
       captureRunning, setCaptureRunning,
       theme, setTheme,
-      trainFile, setTrainFile, nDetectors, setND, rRadius, setR, rsRadius, setRS,
+      trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit, rRadius, setR, rsRadius, setRS,
       trainLogs, setTrainLogs, trainResult, setTrainResult,
-      detectFile, setDetectFile, detectLimit, setDetectLimit,
+      detectFile, setDetectFile, detectLimit, setDetectLimit, detectOffset, setDetectOffset,
       detectLogs, setDetectLogs, detectResult, setDetectResult,
       // Live session state
       CHART_LEN,

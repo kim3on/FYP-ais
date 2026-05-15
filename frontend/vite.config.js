@@ -22,5 +22,6 @@ export default defineConfig({
   },
   build: {
     outDir: '../app/static_react', // FastAPI will serve from here
+    emptyOutDir: true,
   },
 })

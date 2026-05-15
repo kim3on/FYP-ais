@@ -103,7 +103,13 @@ class CICIDSPreprocessor:
     #  PUBLIC API                                                          #
     # ------------------------------------------------------------------ #
 
-    def fit_transform(self, source, label_col=None, filename: str = ''):
+    def fit_transform(
+        self,
+        source,
+        label_col=None,
+        filename: str = '',
+        allow_unsafe_full_dataset_fit: bool = False,
+    ):
         """
         Legacy entry point for training.
         Warning: This fits on the provided source. In pipeline context, 
@@ -117,6 +123,16 @@ class CICIDSPreprocessor:
         df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
 
         df, y = self._encode_labels(df, label_col)
+        if (
+            not allow_unsafe_full_dataset_fit
+            and len(np.unique(y)) > 1
+        ):
+            raise ValueError(
+                "Unsafe mixed labelled fit_transform() blocked. Split the data first, "
+                "fit preprocessing on training BENIGN rows only, then transform "
+                "calibration/test rows. For legacy tests only, call "
+                "fit_transform_unsafe_single_dataset()."
+            )
         
         # Save attack_category before numeric clean
         attack_cat = df['attack_category'].copy() if 'attack_category' in df.columns else None
@@ -140,6 +156,18 @@ class CICIDSPreprocessor:
 
         self.is_fitted_ = True
         return X_all_scaled[y == 0], y, df_clean
+
+    def fit_transform_unsafe_single_dataset(self, source, label_col=None, filename: str = ''):
+        """
+        Compatibility helper for old tests/demos that intentionally fit on one
+        complete labelled dataset. Do not use for honest train/test evaluation.
+        """
+        return self.fit_transform(
+            source,
+            label_col=label_col,
+            filename=filename,
+            allow_unsafe_full_dataset_fit=True,
+        )
 
     def fit(self, df: pd.DataFrame, label_col: str = None):
         """Fit preprocessor on a training DataFrame."""
@@ -194,6 +222,58 @@ class CICIDSPreprocessor:
         if self.pca_ is not None:
             X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
         return X_scaled, df_numeric
+
+    def transform_with_raw(self, source, filename: str = ''):
+        """
+        Transform and return both PCA features AND raw pre-PCA features.
+
+        Used by the two-layer detection architecture:
+        - PCA features feed the NSA V-Detector (Layer 1a)
+        - Raw features feed the SelfBoundaryDetector (Layer 1b)
+
+        Returns
+        -------
+        X_pca : ndarray
+            PCA-transformed features for NSA.
+        df_meta : DataFrame
+            Cleaned DataFrame with forensic metadata columns preserved.
+        df_raw_features : DataFrame
+            Raw numeric features (pre-scaling, pre-PCA) for self-boundary scoring.
+        """
+        self._check_fitted()
+        df = self._load(source, filename=filename)
+        df, label_col = self._find_label_col(df, required=False)
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        df[num_cols] = df[num_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
+        if label_col:
+            df, _ = self._encode_labels(df, label_col)
+
+        _FORENSIC_COLS = ['attack_category', 'Destination Port',
+                          'Source IP', 'Destination IP', 'Protocol',
+                          'Source Port', 'Timestamp']
+        preserved = {}
+        for col in _FORENSIC_COLS:
+            for candidate in [col, col.strip()]:
+                if candidate in df.columns:
+                    preserved[col] = df[candidate].copy()
+                    break
+
+        df = self._clean(df, inference=True)
+
+        if preserved:
+            df = df.copy()
+            for col, series in preserved.items():
+                df[col] = series.values
+
+        # Raw features before scaling/PCA — for self-boundary detector
+        df_raw_features = df[self.feature_columns_].copy()
+
+        X = df[self.feature_columns_].values.astype(np.float32)
+        X_scaled = self.scaler_.transform(X)
+        if self.pca_ is not None:
+            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        return X_scaled, df, df_raw_features
+
 
 
     def transform(self, source, filename: str = ''):
@@ -358,10 +438,18 @@ class CICIDSPreprocessor:
         # Binary encoding
         y = (raw_labels.str.upper() != NORMAL_LABEL.upper()).astype(int).values
 
-        # Dashboard category
+        # Dashboard category. Some CIC-IDS-2017 Web Attack labels contain
+        # mojibake/replacement characters; normalize separators before mapping.
+        category_labels = (
+            raw_labels.str.lower()
+            .str.replace("\u2013", " - ", regex=False)
+            .str.replace("\ufffd", " - ", regex=False)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+        )
         df = df.copy()
         df['attack_category'] = (
-            raw_labels.str.lower()
+            category_labels
             .map(ATTACK_CATEGORIES)
             .fillna('Unknown')
         )

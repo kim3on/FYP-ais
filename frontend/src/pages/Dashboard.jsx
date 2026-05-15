@@ -248,7 +248,7 @@ export default function Dashboard() {
       }
     }, 2000);
     return () => clearInterval(id);
-  }, [captureRunning, setLivePktCount]);
+  }, [captureRunning, setCaptureRunning, setLivePktCount]);
 
   async function handleStartCapture() {
     setCaptureError('');

@@ -9,7 +9,7 @@ from the persisted artefacts and the currently active model.
 """
 
 from app.core.pipeline import (
-    load_nsa, load_iso, load_preprocessor,
+    load_nsa, load_iso, load_preprocessor, load_self_boundary,
 )
 from app.core.detection import DetectionEngine
 
@@ -43,4 +43,9 @@ def _build_engine() -> DetectionEngine:
     """Build a DetectionEngine from the persisted artefacts."""
     prep = load_preprocessor()
     model = load_iso() if _state["active_model"] == "isolation_forest" else load_nsa()
-    return DetectionEngine(model, prep, active_model=_state["active_model"])
+    sb = load_self_boundary()
+    return DetectionEngine(
+        model, prep,
+        active_model=_state["active_model"],
+        self_boundary=sb,
+    )

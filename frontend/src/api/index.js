@@ -90,10 +90,13 @@ export async function getTrainingLogs()   { return apiFetch('/api/train/logs'); 
 export async function getTrainingResult() { return apiFetch('/api/train/result'); }
 
 // ── Detection ─────────────────────────────────────────────────
-export async function detectFromFile(file, limit) {
+export async function detectFromFile(file, limit, offset = 0) {
   const form = new FormData();
   form.append('file', file);
-  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : '';
+  const params = new URLSearchParams();
+  if (limit) params.set('limit', String(limit));
+  if (offset) params.set('offset', String(offset));
+  const query = params.toString() ? `?${params}` : '';
   const res = await fetch(`/api/detect${query}`, {
     method: 'POST',
     headers: authHeader(),

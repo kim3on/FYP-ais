@@ -11,6 +11,7 @@ export default function Detection() {
   const [result, setResult]     = useState(null);
   const [error, setError]       = useState('');
   const [limit, setLimit]       = useState(1000);
+  const [offset, setOffset]     = useState(0);
   const logRef  = useRef(null);
   const pollRef = useRef(null);
 
@@ -32,7 +33,7 @@ export default function Detection() {
     setError(''); setLoading(true); setResult(null); setLogs([]);
     try {
       pollRef.current = setInterval(pollLogs, 1500);
-      await detectFromFile(file, limit);
+      await detectFromFile(file, limit, offset);
       const r = await getDetectionResult();
       setResult(r);
     } catch (err) {
@@ -48,6 +49,23 @@ export default function Detection() {
   const alerts    = result?.alerts || [];
   const zdCount   = alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length;
   const anomCount = alerts.filter(a=>!a.is_false_positive).length;
+
+  // Metric assessment badge helper
+  const gradeBadge = (assessment) => {
+    if (!assessment) return null;
+    const colors = {
+      target_met: { bg: 'var(--success-subtle)', border: 'var(--success-border)', color: 'var(--success)', label: 'TARGET MET' },
+      prototype_acceptable: { bg: 'var(--warning-subtle)', border: 'var(--warning-border)', color: 'var(--warning)', label: 'ACCEPTABLE' },
+      needs_improvement: { bg: 'var(--danger-subtle)', border: 'var(--danger-border)', color: 'var(--danger)', label: 'NEEDS WORK' },
+      not_applicable: { bg: 'var(--bg-overlay)', border: 'var(--border)', color: 'var(--text-tertiary)', label: 'N/A' },
+    };
+    const s = colors[assessment.grade] || colors.not_applicable;
+    return (
+      <span style={{fontSize:'8px',fontWeight:700,fontFamily:'var(--font-mono)',background:s.bg,border:`1px solid ${s.border}`,color:s.color,padding:'2px 6px',borderRadius:'4px',marginLeft:'6px',letterSpacing:'0.05em'}}>
+        {s.label}
+      </span>
+    );
+  };
 
   return (
     <div className="page">
@@ -81,10 +99,17 @@ export default function Detection() {
           </div>
 
           <div className="card">
-            <label>Row Limit — <span style={{color:'var(--accent)'}}>{limit.toLocaleString()}</span></label>
-            <input type="range" min="100" max="10000" step="100" value={limit}
+            <label>Start Row — <span style={{color:'var(--accent)'}}>{offset.toLocaleString()}</span></label>
+            <input type="number" min="0" step="1000" value={offset}
+              onChange={e=>setOffset(Math.max(0, Number(e.target.value)||0))}
+              style={{marginTop:'8px',marginBottom:'12px'}} />
+            <label>Rows to Analyse — <span style={{color:'var(--accent)'}}>{limit.toLocaleString()}</span></label>
+            <input type="range" min="100" max="50000" step="100" value={limit}
               onChange={e=>setLimit(+e.target.value)}
               style={{padding:0,cursor:'pointer',accentColor:'var(--accent)',marginTop:'8px'}} />
+            <p style={{fontSize:'10px',color:'var(--text-tertiary)',fontFamily:'var(--font-mono)',marginTop:'8px'}}>
+              Analysing rows {offset.toLocaleString()}–{(offset+limit).toLocaleString()}.
+            </p>
           </div>
 
           {error && <div style={{background:'var(--danger-subtle)',border:'1px solid var(--danger-border)',color:'var(--danger)',padding:'10px 14px',borderRadius:'var(--radius)',fontSize:'12px',fontFamily:'var(--font-mono)'}}>⚠ {error}</div>}
@@ -115,7 +140,7 @@ export default function Detection() {
             <div className="stat-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
               <div className="stat-card">
                 <div className="stat-label">Total Flows</div>
-                <div className="stat-value">{result.total_flows ?? alerts.length}</div>
+                <div className="stat-value">{result.total_checked ?? alerts.length}</div>
               </div>
               <div className="stat-card" style={{borderColor:anomCount>0?'var(--danger-border)':'var(--border)'}}>
                 <div className="stat-label" style={{color:'var(--danger)'}}>Anomalies</div>
@@ -129,18 +154,36 @@ export default function Detection() {
               )}
             </div>
 
-            {/* Metrics if available */}
+            {/* Post-run verification metrics */}
             {result.accuracy != null && (
               <div className="card">
-                <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'12px'}}>Model Metrics</div>
+                <div style={{fontSize:'11px',fontWeight:600,fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:'4px'}}>Post-Run Verification Metrics</div>
+                {result.verification_mode && (
+                  <div style={{fontSize:'9px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',marginBottom:'12px',lineHeight:1.4}}>
+                    Labels used only after detection · Layer 2 attribution is heuristic-only
+                  </div>
+                )}
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
-                  {[['Accuracy',result.accuracy],['Precision',result.precision],['Recall',result.recall],['F1',result.f1],['FPR',result.false_positive_rate]].map(([k,v])=>(
+                  {[['Recall',result.recall,'recall'],['FNR',result.false_negative_rate,'false_negative_rate'],['Precision',result.precision,'precision'],['F1',result.f1,'f1'],['FPR',result.false_positive_rate,'false_positive_rate'],['Accuracy',result.accuracy,null]].map(([k,v,assessKey])=>(
                     <div key={k} style={{background:'var(--bg-overlay)',borderRadius:'var(--radius)',padding:'10px 12px'}}>
-                      <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',marginBottom:'4px'}}>{k}</div>
-                      <div style={{fontSize:'20px',fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--success)'}}>{v!=null?`${(v*100).toFixed(1)}%`:'—'}</div>
+                      <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)',textTransform:'uppercase',marginBottom:'4px'}}>
+                        {k}
+                        {assessKey && result.metric_assessment && gradeBadge(result.metric_assessment[assessKey])}
+                      </div>
+                      <div style={{fontSize:'20px',fontWeight:700,fontFamily:'var(--font-mono)',color:v!=null?'var(--success)':'var(--text-tertiary)'}}>{v!=null?`${(v*100).toFixed(1)}%`:'N/A'}</div>
                     </div>
                   ))}
                 </div>
+                {(result.tp != null || result.fn != null) && (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginTop:'10px'}}>
+                    {[['TP',result.tp,'var(--success)'],['TN',result.tn,'var(--text-secondary)'],['FP',result.fp,'var(--warning)'],['FN',result.fn,'var(--danger)']].map(([k,v,c])=>(
+                      <div key={k} style={{textAlign:'center',background:'var(--bg-overlay)',borderRadius:'var(--radius)',padding:'6px'}}>
+                        <div style={{fontSize:'9px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)'}}>{k}</div>
+                        <div style={{fontSize:'16px',fontWeight:700,fontFamily:'var(--font-mono)',color:c}}>{v != null ? v.toLocaleString() : '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

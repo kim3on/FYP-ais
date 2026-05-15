@@ -1,5 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
 
+const debugWebSocket = (...args) => {
+  if (import.meta.env.DEV) {
+    console.debug(...args);
+  }
+};
+
 /**
  * useWebSocket — manages a WebSocket connection with auto-cleanup.
  *
@@ -32,19 +38,18 @@ export function useWebSocket(url, onMessage, enabled = true) {
 
     const ws = new WebSocket(fullUrl);
 
-    ws.onopen    = () => console.log(`[WS] connected: ${url}`);
+    ws.onopen    = () => debugWebSocket(`[WS] connected: ${url}`);
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         onMsgRef.current(data);
-      } catch (err) {
-        console.debug("[WS] Non-JSON message:", err);
+      } catch {
         onMsgRef.current(e.data); // pass raw if not JSON
       }
     };
     ws.onerror  = (e) => console.warn(`[WS] error on ${url}`, e);
     ws.onclose  = () => {
-      console.log(`[WS] closed: ${url}`);
+      debugWebSocket(`[WS] closed: ${url}`);
       wsRef.current = null;
     };
 

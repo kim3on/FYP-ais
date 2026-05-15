@@ -1,45 +1,68 @@
 """
-Detection Engine
-=================
-Handles real-time and batch anomaly detection against uploaded
-packet logs or live traffic streams.
+Detection Engine — Two-Layer AIS IDS
+========================================
+Layer 1: Binary unsupervised anomaly detection (NSA + Self-Boundary).
+Layer 2: Post-alert attack attribution using flow-feature heuristics.
+Layer 3: Post-run labelled verification (uses labels only after detection).
 
-Produces structured alert objects that map directly to the
-Alert Log table in the frontend dashboard.
+The detection engine NEVER uses ground-truth labels (attack_category, Label)
+during detection.  Labels are consumed only by _labelled_metrics() after
+all predictions are complete.
 """
+
+import logging
 
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional
 import uuid
 
 from app.core.preprocessor import CICIDSPreprocessor
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
+    assess_metric,
     compute_silhouette_metric,
     evaluate_model,
     severity_from_score,
+    source_decomposition_metrics,
     threshold_analysis,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AlertRecord:
-    """A single anomaly alert — maps to one row in the dashboard table."""
+    """A single anomaly alert — maps to one row in the dashboard table.
+
+    Two-layer output:
+      - Layer 1 fields: is_anomaly, anomaly_score, anomaly_sources
+      - Layer 2 fields: likely_attack_family, attribution_confidence, evidence
+      - Legacy: attack_type aliases likely_attack_family for backward compat
+    """
     alert_id:        str
     timestamp:       str
     src_ip:          str
     dst_ip:          str
     dst_port:        str
     protocol:        str
-    attack_type:     str        # predicted attack category
-    severity:        str        # critical / high / medium / low
-    confidence:      float      # [0, 1]
-    confidence_pct:  str        # "94%"
-    is_false_positive: bool     # analyst can mark this
-    is_zero_day:     bool       # True when no known signature matched + high novelty
+    # Layer 1 — binary anomaly detection
+    is_anomaly:      bool
+    anomaly_score:   float        # [0, 1]
+    anomaly_sources: list         # e.g. ["nsa_pca", "self_boundary"]
+    # Layer 2 — attack attribution (heuristic only, never uses labels)
+    likely_attack_family: str     # e.g. "DDoS — SYN Flood"
+    attribution_confidence: str   # "high", "medium", "low"
+    evidence:        list         # human-readable explanation strings
+    # Display helpers
+    attack_type:     str          # alias of likely_attack_family (backward compat)
+    severity:        str          # critical / high / medium / low
+    confidence:      float        # [0, 1]
+    confidence_pct:  str          # "94%"
+    is_false_positive: bool       # analyst can mark this
+    is_zero_day:     bool         # True when no known signature matched + high novelty
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -47,33 +70,31 @@ class AlertRecord:
 
 class DetectionEngine:
     """
-    Wraps either the NSA or Isolation Forest model for detection.
-    Handles feature alignment, scoring, and alert generation.
+    Two-layer AIS detection engine.
+
+    Layer 1a — NSA V-Detector (PCA space): detector match + self-gap.
+    Layer 1b — Self-Boundary (original feature space): Gaussian z-score fences.
+    Layer 2  — Attack Attribution: flow-feature heuristics (never uses labels).
 
     Parameters
     ----------
-    model       : fitted NSA or IsolationForest detector
-    preprocessor: fitted NSLKDDPreprocessor
-    active_model: "nsa" or "isolation_forest"
+    model         : fitted NSA or IsolationForest detector
+    preprocessor  : fitted CICIDSPreprocessor
+    active_model  : "nsa" or "isolation_forest"
+    self_boundary : fitted SelfBoundaryDetector (optional)
     """
-
-    # Known attack type patterns inferred from NSL-KDD feature signatures
-    _ATTACK_SIGNATURES = {
-        "DoS":   "Denial of Service",
-        "Probe": "Network Probe",
-        "R2L":   "Remote to Local",
-        "U2R":   "User to Root",
-    }
 
     def __init__(
         self,
         model,
         preprocessor: CICIDSPreprocessor,
         active_model: str = "nsa",
+        self_boundary=None,
     ):
         self.model = model
         self.preprocessor = preprocessor
         self.active_model = active_model
+        self.self_boundary = self_boundary
 
     # ------------------------------------------------------------------ #
     #  BATCH DETECTION (CSV upload)                                        #
@@ -83,6 +104,7 @@ class DetectionEngine:
         self,
         source,                     # file path, bytes, or file-like
         limit: Optional[int] = None,
+        offset: int = 0,
         filename: str = "",
     ) -> dict:
         """
@@ -99,25 +121,77 @@ class DetectionEngine:
           "summary": {...}
         }
         """
-        X_scaled, df = self.preprocessor.transform(source, filename=filename)
-        if limit:
-            X_scaled = X_scaled[:limit]
-            df = df.iloc[:limit].reset_index(drop=True)
-
-        if hasattr(self.model, 'predict_with_details'):
-            labels, scores, min_dists = self.model.predict_with_details(X_scaled)
+        # Use transform_with_raw when self-boundary is available
+        if self.self_boundary is not None:
+            X_pca, df, df_raw = self.preprocessor.transform_with_raw(
+                source, filename=filename
+            )
         else:
-            labels, scores = self.model.predict_with_scores(X_scaled)
-            min_dists = None
+            X_pca, df = self.preprocessor.transform(source, filename=filename)
+            df_raw = None
 
-        raw_scores = self._raw_anomaly_scores(X_scaled, scores)
+        offset = max(int(offset or 0), 0)
+        if limit:
+            end = offset + int(limit)
+            X_pca = X_pca[offset:end]
+            df = df.iloc[offset:end].reset_index(drop=True)
+            if df_raw is not None:
+                df_raw = df_raw.iloc[offset:end].reset_index(drop=True)
+        elif offset:
+            X_pca = X_pca[offset:]
+            df = df.iloc[offset:].reset_index(drop=True)
+            if df_raw is not None:
+                df_raw = df_raw.iloc[offset:].reset_index(drop=True)
+        df.attrs["row_offset"] = offset
+
+        sb_ratios = None
+        sb_flags = None
+        sb_evidence = None
+        nsa_flags = None
+        decision_components = None
+
+        if (
+            self.self_boundary is not None
+            and df_raw is not None
+            and self._fusion_ready()
+        ):
+            sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
+            sb_weighted_scores = self.self_boundary.weighted_score(df_raw)
+            labels, scores, raw_scores = self.model.predict_fused(
+                X_pca,
+                self_boundary_scores=sb_weighted_scores,
+            )
+            decision_components = self.model.decision_components(
+                X_pca,
+                self_boundary_scores=sb_weighted_scores,
+            ) if hasattr(self.model, "decision_components") else None
+            min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
+            nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
+        else:
+            if hasattr(self.model, 'predict_with_details'):
+                labels, scores, min_dists = self.model.predict_with_details(X_pca)
+            else:
+                labels, scores = self.model.predict_with_scores(X_pca)
+                min_dists = None
+            raw_scores = self._raw_anomaly_scores(X_pca, scores)
+            decision_components = self.model.decision_components(
+                X_pca,
+            ) if hasattr(self.model, "decision_components") else None
+            if self.self_boundary is not None and df_raw is not None:
+                sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
+
         return self._build_result(
             labels,
             scores,
             df,
             min_dists=min_dists,
             raw_scores=raw_scores,
-            features=X_scaled,
+            features=X_pca,
+            nsa_flags=nsa_flags,
+            sb_ratios=sb_ratios,
+            sb_flags=sb_flags,
+            sb_evidence=sb_evidence,
+            decision_components=decision_components,
         )
 
     # ------------------------------------------------------------------ #
@@ -130,20 +204,48 @@ class DetectionEngine:
         Returns a single AlertRecord if anomalous, else None.
         """
         df_single = pd.DataFrame([feature_dict])
-        X_scaled = self.preprocessor.transform_dataframe(df_single)
-        if hasattr(self.model, 'predict_with_details'):
-            labels, scores, min_dists = self.model.predict_with_details(X_scaled)
+        X_pca = self.preprocessor.transform_dataframe(df_single)
+        sb_ratios = None
+        sb_flags = None
+        sb_evidence = None
+        nsa_flags = None
+        decision_components = None
+        if self.self_boundary is not None and self._fusion_ready():
+            sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_single)
+            sb_weighted_scores = self.self_boundary.weighted_score(df_single)
+            labels, scores, raw_scores = self.model.predict_fused(
+                X_pca,
+                self_boundary_scores=sb_weighted_scores,
+            )
+            decision_components = self.model.decision_components(
+                X_pca,
+                self_boundary_scores=sb_weighted_scores,
+            ) if hasattr(self.model, "decision_components") else None
+            min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
+            nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
         else:
-            labels, scores = self.model.predict_with_scores(X_scaled)
-            min_dists = None
-        raw_scores = self._raw_anomaly_scores(X_scaled, scores)
+            if hasattr(self.model, 'predict_with_details'):
+                labels, scores, min_dists = self.model.predict_with_details(X_pca)
+            else:
+                labels, scores = self.model.predict_with_scores(X_pca)
+                min_dists = None
+            raw_scores = self._raw_anomaly_scores(X_pca, scores)
+            decision_components = self.model.decision_components(
+                X_pca,
+            ) if hasattr(self.model, "decision_components") else None
+
         return self._build_result(
             labels,
             scores,
             df_single,
             min_dists=min_dists,
             raw_scores=raw_scores,
-            features=X_scaled,
+            features=X_pca,
+            nsa_flags=nsa_flags,
+            sb_ratios=sb_ratios,
+            sb_flags=sb_flags,
+            sb_evidence=sb_evidence,
+            decision_components=decision_components,
         )
 
     # ------------------------------------------------------------------ #
@@ -158,6 +260,11 @@ class DetectionEngine:
         min_dists: Optional[np.ndarray] = None,
         raw_scores: Optional[np.ndarray] = None,
         features: Optional[np.ndarray] = None,
+        nsa_flags: Optional[np.ndarray] = None,
+        sb_ratios: Optional[np.ndarray] = None,
+        sb_flags: Optional[np.ndarray] = None,
+        sb_evidence: Optional[list] = None,
+        decision_components: Optional[dict] = None,
     ) -> dict:
         """Convert raw predictions to structured result with alert objects."""
         alerts = []
@@ -181,9 +288,74 @@ class DetectionEngine:
             _proto_map = {'6': 'TCP', '17': 'UDP', '0': 'OTHER', '58': 'ICMPv6'}
             protocol = _proto_map.get(str(protocol), str(protocol)).upper()
 
-            cat = str(self._get(row, ['attack_category'], 'Unknown'))
-            attack_type = self._infer_attack_type(row, cat, novelty_score=score)
-            is_zero_day = (attack_type == 'Zero-Day Candidate')
+            # ── Layer 1: Determine anomaly sources ──────────────────────
+            anomaly_sources = []
+            nsa_flagged = False
+            sb_flagged = False
+
+            # Check which NSA sub-mechanisms fired before final fusion.
+            v_detector_flagged = False
+            self_gap_flagged = False
+            fusion_flagged = False
+            if decision_components is not None:
+                v_detector_flagged = bool(decision_components.get("v_detector_match", [False])[i])
+                self_gap_flagged = bool(decision_components.get("self_gap_match", [False])[i])
+                fusion_flagged = bool(decision_components.get("fusion_score_match", [False])[i])
+                nsa_flagged = bool(v_detector_flagged or self_gap_flagged or decision_components.get("nsa_score_match", [False])[i])
+            elif nsa_flags is not None and i < len(nsa_flags):
+                nsa_flagged = bool(nsa_flags[i] == 1)
+            elif hasattr(self.model, 'predict_with_details'):
+                nsa_labels_only, _, _ = self.model.predict_with_details(
+                    features[i:i+1] if features is not None else np.zeros((1, 1))
+                )
+                nsa_flagged = bool(nsa_labels_only[0] == 1)
+            elif hasattr(self.model, 'predict_with_scores'):
+                nsa_labels_only, _ = self.model.predict_with_scores(
+                    features[i:i+1] if features is not None else np.zeros((1, 1))
+                )
+                nsa_flagged = bool(nsa_labels_only[0] == 1)
+
+            if v_detector_flagged:
+                anomaly_sources.append("v_detector")
+            if self_gap_flagged:
+                anomaly_sources.append("self_gap")
+            if not decision_components and nsa_flagged:
+                anomaly_sources.append("nsa_pca")
+
+            if sb_flags is not None and i < len(sb_flags) and sb_flags[i]:
+                sb_flagged = True
+                anomaly_sources.append("self_boundary")
+
+            if fusion_flagged and not v_detector_flagged and not self_gap_flagged:
+                anomaly_sources.append("score_fusion")
+
+            if not anomaly_sources:
+                anomaly_sources.append("score_fusion")
+
+            # ── Layer 2: Attack Attribution (NEVER uses labels) ─────────
+            # The attack_category column is intentionally NOT passed here.
+            attack_family = self._attribute_attack(row, novelty_score=score)
+            is_zero_day = (attack_family == 'Zero-Day Candidate')
+
+            # Attribution confidence based on how many sources agree
+            # and the strength of the anomaly score
+            if len(anomaly_sources) >= 2 and score >= 0.5:
+                attr_confidence = "high"
+            elif score >= 0.3 or len(anomaly_sources) >= 2:
+                attr_confidence = "medium"
+            else:
+                attr_confidence = "low"
+
+            # Build evidence list
+            evidence = []
+            if sb_evidence is not None and i < len(sb_evidence):
+                evidence.extend(sb_evidence[i])
+            if v_detector_flagged:
+                evidence.append("Mature V-detector matched the flow")
+            if self_gap_flagged:
+                evidence.append("PCA NSA self-gap exceeded")
+            if not nsa_flagged and not sb_flagged:
+                evidence.append("Benign-calibrated AIS fusion threshold exceeded")
 
             alert = AlertRecord(
                 alert_id=str(uuid.uuid4())[:8].upper(),
@@ -192,7 +364,16 @@ class DetectionEngine:
                 dst_ip=dst_ip,
                 dst_port=dst_port,
                 protocol=protocol,
-                attack_type=attack_type,
+                # Layer 1
+                is_anomaly=True,
+                anomaly_score=round(score, 4),
+                anomaly_sources=anomaly_sources,
+                # Layer 2
+                likely_attack_family=attack_family,
+                attribution_confidence=attr_confidence,
+                evidence=evidence,
+                # Backward compat
+                attack_type=attack_family,
                 severity=severity,
                 confidence=round(score, 4),
                 confidence_pct=f"{round(score * 100)}%",
@@ -208,6 +389,7 @@ class DetectionEngine:
 
         result = {
             "total_checked":      total,
+            "row_offset":         int(df.attrs.get("row_offset", 0)) if hasattr(df, "attrs") else 0,
             "anomalies_found":    n_anomalies,
             "normal_count":       total - n_anomalies,
             "zero_day_candidates": n_zero_day,
@@ -217,6 +399,9 @@ class DetectionEngine:
             "model_used":         self.active_model,
             "analysed_at":        datetime.now(timezone.utc).isoformat(),
             "metric_explanations": METRIC_EXPLANATIONS,
+            "detection_architecture": "two_layer_ais_score_fusion",
+            "layer1_sources": ["v_detector", "self_gap", "score_fusion"] + (["self_boundary"] if self.self_boundary else []),
+            "score_mode": "weighted_fusion" if self.self_boundary is not None and self._fusion_ready() else "model_score",
         }
         if silhouette is not None:
             result["unsupervised_validation"] = {
@@ -226,7 +411,12 @@ class DetectionEngine:
             }
             result["silhouette_score"] = silhouette["value"]
 
-        result.update(self._labelled_metrics(labels, df, raw_scores=raw_scores))
+        result.update(self._labelled_metrics(
+            labels,
+            df,
+            raw_scores=raw_scores,
+            decision_components=decision_components,
+        ))
         return result
 
     def _labelled_metrics(
@@ -234,8 +424,14 @@ class DetectionEngine:
         labels: np.ndarray,
         df: pd.DataFrame,
         raw_scores: Optional[np.ndarray] = None,
+        decision_components: Optional[dict] = None,
     ) -> dict:
-        """Return classification metrics when uploaded detection data has labels."""
+        """
+        Return classification metrics when uploaded detection data has labels.
+
+        LAYER 3 — Post-run verification only.
+        Labels are NEVER used during detection (Layers 1 & 2).
+        """
         if "attack_category" not in df.columns or len(df) != len(labels):
             return {}
 
@@ -244,6 +440,10 @@ class DetectionEngine:
             return {}
 
         y_true = categories.str.lower().ne("normal").astype(int).to_numpy()
+
+        # Check if there are any attacks — if not, metrics like recall are N/A
+        n_attacks = int(y_true.sum())
+
         metrics = evaluate_model(
             y_true,
             labels.astype(int),
@@ -252,13 +452,30 @@ class DetectionEngine:
         ).to_dict()
         metrics["verification_mode"] = "post_run_labelled_verification"
         metrics["verification_note"] = (
-            "Labels were used only after unsupervised detection to score predictions."
+            "Labels were used only after unsupervised detection to score predictions. "
+            "No labels were used during Layer 1 anomaly detection or Layer 2 attribution."
         )
+
+        # If no attacks in file slice, mark attack-dependent metrics as N/A
+        if n_attacks == 0:
+            for m in ("recall", "false_negative_rate", "precision", "f1",
+                      "detection_rate", "true_positive_rate"):
+                metrics[m] = None
+            metrics["verification_note"] += (
+                " This file slice contains no labelled attacks; "
+                "recall, FNR, precision, and F1 are not applicable."
+            )
+
         if raw_scores is not None and len(raw_scores) == len(labels):
             metrics["threshold_analysis"] = threshold_analysis(
                 y_true,
                 raw_scores,
                 model_name=f"{self.active_model} threshold analysis",
+            )
+        if decision_components is not None:
+            metrics["source_decomposition"] = source_decomposition_metrics(
+                y_true,
+                decision_components,
             )
         return metrics
 
@@ -273,26 +490,34 @@ class DetectionEngine:
         if hasattr(self.model, "anomaly_scores"):
             try:
                 return np.asarray(self.model.anomaly_scores(X_scaled), dtype=float)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to confidence scores for threshold analysis; "
+                    "raw anomaly scoring failed for %s: %s",
+                    type(self.model).__name__,
+                    exc,
+                )
         return np.asarray(confidence_scores, dtype=float)
 
-    def _infer_attack_type(self, row, category: str, novelty_score: float = 0.0) -> str:
-        """Two-stage attack type classifier.
+    # ================================================================== #
+    #  LAYER 2 — Attack Attribution (flow-feature heuristics ONLY)         #
+    #                                                                      #
+    #  NEVER receives or uses attack_category / Label columns.             #
+    #  Uses only raw CIC-IDS-2017 flow statistics to guess the attack      #
+    #  family.  A wrong guess does NOT count as a false negative.           #
+    # ================================================================== #
 
-        Stage 1 — known category from preprocessor Label column:
-            Sub-classifies each broad category using per-flow CIC-IDS-2017
-            feature signatures (e.g. DoS-Hulk vs Slowloris vs GoldenEye).
-
-        Stage 2 — unlabeled / live traffic (category == 'unknown'):
-            12 flow-statistic heuristics infer the attack type without
-            ground-truth labels, enabling real-time traffic classification.
-
-        Zero-Day Candidate:
-            Final fallback when no signature matches AND novelty_score >= 0.65.
+    def _attribute_attack(self, row, novelty_score: float = 0.0) -> str:
         """
-        cat = category.lower().strip()
+        Post-detection attack family attribution using flow features only.
 
+        This is Layer 2: it runs ONLY on samples already flagged as anomalous.
+        It NEVER uses ground-truth labels.  Replaces the old _infer_attack_type
+        which had a Stage 1 that read attack_category (label leakage).
+
+        Rule order matters: more specific signatures (brute force on known ports)
+        MUST be checked BEFORE generic volumetric rules.
+        """
         # ── Helper shortcuts ─────────────────────────────────────────────
         def g(keys, default=0):
             return self._get(row, keys, default)
@@ -315,72 +540,6 @@ class DetectionEngine:
         is_tcp    = proto_raw in ('6', 'TCP', 'tcp')
         is_udp    = proto_raw in ('17', 'UDP', 'udp')
 
-        # ════════════════════════════════════════════════════════════════
-        #  STAGE 1 — known category from labeled dataset
-        # ════════════════════════════════════════════════════════════════
-
-        if cat == 'dos':
-            if duration > 300_000_000 and fwd_pkts < 100 and is_tcp:
-                return 'DoS — Slowloris'
-            if duration > 60_000_000 and psh > fwd_pkts * 0.4 and fwd_pkts < 300:
-                return 'DoS — GoldenEye'
-            if pkt_rate > 5_000 and byte_rate > 100_000 and is_tcp:
-                return 'DoS — Hulk'
-            if duration > 60_000_000 and fwd_len < 200 and bwd_pkts == 0:
-                return 'DoS — SlowHTTPTest'
-            return 'DoS Attack'
-
-        if cat == 'ddos':
-            if is_udp:
-                return 'DDoS — UDP Flood'
-            if syn > ack and pkt_rate > 1_000:
-                return 'DDoS — SYN Flood'
-            return 'DDoS — TCP Flood' if pkt_rate > 5_000 else 'DDoS'
-
-        if cat == 'probe':
-            if syn > 0 and fwd_pkts <= 3 and bwd_pkts == 0:
-                return 'Port Scan — SYN Stealth'
-            if is_udp and fwd_pkts <= 2:
-                return 'Port Scan — UDP'
-            if fwd_pkts <= 2 and duration < 1_000_000:
-                return 'Network Enumeration'
-            return 'Port Scan'
-
-        if cat == 'brute force':
-            dst_port = str(g(['Destination Port', 'dst_port'], ''))
-            _port_names = {'22': 'SSH', '21': 'FTP', '3389': 'RDP',
-                           '3306': 'MySQL', '5432': 'PostgreSQL', '23': 'Telnet'}
-            if dst_port in _port_names:
-                return f'Brute Force — {_port_names[dst_port]}'
-            return 'Credential Brute Force'
-
-        if cat == 'web attack':
-            raw = str(g(['attack_category'], '')).lower()
-            if 'sql' in raw:
-                return 'Web Attack — SQL Injection'
-            if 'xss' in raw:
-                return 'Web Attack — XSS'
-            if 'brute' in raw:
-                return 'Web Attack — HTTP Brute Force'
-            return 'Web Attack'
-
-        if cat == 'botnet':
-            return 'Botnet — C&C Communication'
-
-        if cat == 'infiltration':
-            return 'Network Infiltration'
-
-        if cat == 'heartbleed':
-            return 'Heartbleed — TLS Exploit'
-
-        # ════════════════════════════════════════════════════════════════
-        #  STAGE 2 — unlabeled / live traffic: flow-feature heuristics
-        #
-        #  RULE ORDER MATTERS.  More specific signatures (brute force on
-        #  known ports) MUST be checked BEFORE generic volumetric rules
-        #  to avoid misclassifying Patator-style attacks as DDoS.
-        # ════════════════════════════════════════════════════════════════
-
         dst_port_raw = str(g(['Destination Port', 'dst_port'], ''))
         _brute_ports = {'21': 'FTP', '22': 'SSH', '23': 'Telnet',
                         '3389': 'RDP', '3306': 'MySQL', '5432': 'PostgreSQL',
@@ -390,10 +549,8 @@ class DetectionEngine:
         # Patator / Hydra flows: TCP, targeting auth ports, small packets,
         # bidirectional (server responds with auth challenge/reject).
         if is_tcp and dst_port_raw in _brute_ports:
-            # Relaxed: even short Patator flows (3+ fwd packets) qualify
             if fwd_pkts >= 3 and avg_size < 600:
                 return f'Brute Force — {_brute_ports[dst_port_raw]}'
-            # Longer interactive sessions on auth ports
             if fwd_pkts > 20 and fwd_len < 300 and bwd_len < 300:
                 return f'Brute Force — {_brute_ports[dst_port_raw]}'
 
@@ -461,7 +618,7 @@ class DetectionEngine:
         if novelty_score >= 0.65:
             return 'Zero-Day Candidate'
 
-        return 'Network Anomaly'
+        return 'Unknown Anomaly'
 
 
     @staticmethod
@@ -484,6 +641,13 @@ class DetectionEngine:
             sev = a.get("severity", "low")
             counts[sev] = counts.get(sev, 0) + 1
         return counts
+
+    def _fusion_ready(self) -> bool:
+        return (
+            hasattr(self.model, "predict_fused")
+            and getattr(self.model, "fusion_threshold_", None) is not None
+            and bool(getattr(self.model, "fusion_component_scales_", {}))
+        )
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,1 @@
+import{i as e,n as t}from"./jsx-runtime-ByY1xr43.js";import{t as n}from"./index-CjZzXOC5.js";var r=e(t(),1);function i(){let e=(0,r.useContext)(n);if(!e)throw Error(`useApp must be inside AppProvider`);return e}export{i as t};

@@ -11,6 +11,7 @@ WS   /ws/live                  — WebSocket push for real-time dashboard update
 
 import asyncio
 import datetime
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, Query
@@ -23,6 +24,7 @@ from app.models.db_models import RawFlowDB, AlertDB
 from app.routers.auth import get_current_user
 
 router = APIRouter(tags=["capture"])
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -62,7 +64,9 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
 
         try:
             result = engine.detect_sample(features)
-        except Exception:
+        except Exception as exc:
+            _state["sniffer_error"] = f"Detection failed for completed flow: {exc}"
+            logger.exception("Detection failed for completed flow; dropping flow.")
             return
 
         _state["packet_count"] += 1
@@ -130,8 +134,10 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
 
         try:
             db.commit()
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            _state["sniffer_error"] = f"Database write failed during live capture: {exc}"
+            logger.exception("Database write failed during live capture.")
         finally:
             db.close()
 
@@ -159,7 +165,7 @@ async def stop_capture(user=Depends(get_current_user)):
     sniffer = _state.get("sniffer")
     packets_captured = sniffer.packets_captured if sniffer else _state["packet_count"]
     if sniffer:
-        sniffer.stop()
+        sniffer.stop(flush=True)
 
     _state["capture_active"] = False
     _state["sniffer"]        = None
@@ -281,7 +287,7 @@ async def websocket_live(ws: WebSocket, token: Optional[str] = Query(None)):
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        logger.debug("Live WebSocket loop ended unexpectedly.", exc_info=True)
     finally:
         if ws in _state["ws_clients"]:
             _state["ws_clients"].remove(ws)

@@ -28,11 +28,12 @@ class UserProfileUpdate(BaseModel):
 class TrainConfig(BaseModel):
     r: float = 0.15
     r_s: Optional[float] = None   # Self-tolerance (V-Detector); defaults to min(r*0.1, 0.05)
-    max_detectors: int = 1000
-    max_attempts: int = 30_000
+    max_detectors: int = 1500
+    max_attempts: int = 40_000
     contamination: float = 0.05
     test_size: float = 0.2
     n_pca_components: Optional[int] = 25
+    benign_row_limit: Optional[int] = 20_000
 
 
 class SettingsUpdate(BaseModel):

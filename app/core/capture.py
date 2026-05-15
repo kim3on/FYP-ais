@@ -296,6 +296,7 @@ class FlowAggregator:
         try:
             pkt_data = self._parse(raw_pkt)
         except Exception:
+            logger.debug("Dropping packet that could not be parsed.", exc_info=True)
             return
         if pkt_data is None:
             return

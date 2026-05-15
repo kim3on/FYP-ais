@@ -29,7 +29,9 @@ async def detect(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     limit: Optional[int] = None,
+    offset: Optional[int] = None,
     limit_form: Optional[int] = Form(None, alias="limit"),
+    offset_form: Optional[int] = Form(None, alias="offset"),
 ):
     """
     Upload a network log (CSV or Parquet) and run batch anomaly detection
@@ -52,7 +54,9 @@ async def detect(
     _state["last_detect_result"] = None
 
     raw_limit = limit if limit is not None else limit_form
+    raw_offset = offset if offset is not None else offset_form
     _limit = int(raw_limit) if raw_limit else None
+    _offset = max(int(raw_offset), 0) if raw_offset else 0
 
     def dlog(msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -64,13 +68,15 @@ async def detect(
             dlog(f"[DETECT] File: {upload_filename or 'unknown'}")
             if _limit:
                 dlog(f"[DETECT] Sample limit: {_limit:,} rows")
+            if _offset:
+                dlog(f"[DETECT] Start row offset: {_offset:,}")
 
             engine = _build_engine()
             dlog(f"[DETECT] Model: {_state['active_model'].upper()}")
             dlog("[DETECT] Loading and preprocessing file...")
 
             result = engine.detect_from_csv(
-                dataset_bytes, limit=_limit, filename=upload_filename
+                dataset_bytes, limit=_limit, offset=_offset, filename=upload_filename
             )
 
             _state["alerts"].extend(result["alerts"])

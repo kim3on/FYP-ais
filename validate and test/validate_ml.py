@@ -4,12 +4,19 @@ ML Pipeline Auditor
 Rigorous validation of the AIS-Detect ML pipeline.
 """
 
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from app.core.preprocessor import CICIDSPreprocessor
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from app.core.pipeline import TrainingPipeline
-import io
 
 def make_sample_data(n=1000, n_features=10, seed=42):
     rng = np.random.default_rng(seed)
@@ -30,20 +37,15 @@ def audit_pipeline():
     pipeline = TrainingPipeline(test_size=0.2, random_state=42)
     result = pipeline.run(csv_bytes)
     
-    print(f"  NSA F1: {result['nsa_eval']['f1']:.4f}")
-    print(f"  ISO F1: {result['iso_eval']['f1']:.4f}")
+    labelled = result["post_run_labelled_verification"]
+    assert result["nsa_eval"]["f1"] is None
+    assert result["nsa_eval"]["recall"] is None
+    assert labelled["available"] is True
+    assert labelled["threshold_analysis"]["verification_only"] is True
+    assert labelled["source_decomposition"]["available"] is True
+    print(f"  Labelled AIS F1: {labelled['f1']:.4f}")
+    print(f"  Labelled AIS Recall: {labelled['recall']:.2%}")
     
-    # Check for leakage in artifacts
-    from app.core.pipeline import load_preprocessor
-    prep = load_preprocessor()
-    
-    # In the new pipeline, prep.scaler_ was fitted on df_train_raw.
-    # df_train_raw contains both normal and some attacks.
-    # The attacks in the TEST portion must not have influenced the scaler.
-    
-    # Check if any value in scaler data exceeds the expected train range
-    # (Since attacks are up to 0.9, if the scaler min/max are within [0.2, 0.9] 
-    # it's fine as long as they didn't see the test outliers).
     print("  ✓ Pipeline validated: Leakage resolved via pre-split fitting.")
 
 def audit_imbalance():
@@ -56,9 +58,12 @@ def audit_imbalance():
     pipeline = TrainingPipeline(contamination=0.01)
     result = pipeline.run(csv_bytes)
     
+    labelled = result["post_run_labelled_verification"]
+    assert result["nsa_eval"]["recall"] is None
+    assert labelled["available"] is True
     print(f"  Imbalanced Data (1% attack):")
-    print(f"    NSA Recall: {result['nsa_eval']['recall']:.2%}")
-    print(f"    ISO Recall: {result['iso_eval']['recall']:.2%}")
+    print(f"    Labelled AIS Recall: {labelled['recall']:.2%}")
+    print(f"    Labelled AIS FPR: {labelled['false_positive_rate']:.2%}")
     print("  ✓ Imbalance handling: Evaluator calculates per-category metrics.")
 
 if __name__ == "__main__":

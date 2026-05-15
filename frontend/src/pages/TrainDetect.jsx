@@ -156,6 +156,7 @@ function TrainingTab() {
   const {
     trainFile: file, setTrainFile: setFile,
     nDetectors, setND,
+    benignRowLimit, setBenignRowLimit,
     rRadius, setR,
     rsRadius, setRS,
     trainLogs: logs, setTrainLogs: setLogs,
@@ -182,7 +183,10 @@ function TrainingTab() {
         max_detectors: nDetectors,
         r: rRadius,
         r_s: rsRadius,
+        target_fpr: 0.05,
+        ...(benignRowLimit ? { benign_row_limit: benignRowLimit } : {}),
       });
+
       setLogs(prev => [...prev, `[OK] ${data.message || 'Training started'}`]);
 
       // Poll logs every 1.5s — REPLACE the log array each time (no duplicates)
@@ -245,8 +249,19 @@ function TrainingTab() {
                   <input type="number" value={nDetectors} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))} 
                     style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
                 </label>
-                <input type="range" min="10" max="20000" step="10" value={nDetectors || 500}
+                <input type="range" min="10" max="10000" step="10" value={nDetectors || 1500}
                   onChange={e => setND(Number(e.target.value))}
+                  style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>BENIGN Rows —</span>
+                  <input type="number" min="100" step="1000" value={benignRowLimit}
+                    onChange={e => setBenignRowLimit(e.target.value === '' ? '' : Number(e.target.value))}
+                    style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '100px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
+                </label>
+                <input type="range" min="1000" max="100000" step="1000" value={benignRowLimit || 20000}
+                  onChange={e => setBenignRowLimit(Number(e.target.value))}
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
               </div>
               <div>
@@ -301,6 +316,7 @@ function DetectionTab() {
     detectResult: result, setDetectResult: setResult
   } = useApp();
 
+  const [offset, setOffset]   = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const pollRef = useRef(null);
@@ -315,7 +331,7 @@ function DetectionTab() {
     setLogs(['[INFO] Starting batch detection…']);
     try {
       // POST starts detection in background — returns immediately
-      await detectFromFile(file, limit);
+      await detectFromFile(file, limit, offset);
 
       // Poll every 1.5s — REPLACE log array each time
       pollRef.current = setInterval(async () => {
@@ -361,10 +377,17 @@ function DetectionTab() {
             <FileDropZone file={file} onFile={setFile} inputId="det-file" icon="🔍" />
           </div>
           <div className="card">
-            <label>Row Limit — <span style={{ color: 'var(--accent)' }}>{limit.toLocaleString()}</span></label>
-            <input type="range" min="100" max="10000" step="100" value={limit}
+            <label>Start Row — <span style={{ color: 'var(--accent)' }}>{offset.toLocaleString()}</span></label>
+            <input type="number" min="0" step="1000" value={offset}
+              onChange={e => setOffset(Math.max(0, Number(e.target.value) || 0))}
+              style={{ marginTop: '8px', marginBottom: '12px' }} />
+            <label>Rows to Analyse — <span style={{ color: 'var(--accent)' }}>{limit.toLocaleString()}</span></label>
+            <input type="range" min="100" max="50000" step="100" value={limit}
               onChange={e => setLimit(+e.target.value)}
-              style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px' }} />
+              style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
+            <p className="td-detail-note" style={{ marginTop: '8px' }}>
+              Analysing rows {offset.toLocaleString()}–{(offset + limit).toLocaleString()}.
+            </p>
           </div>
           {error && <div className="inline-error">⚠ {error}</div>}
           <button className="btn btn-primary" onClick={handleDetect} disabled={loading || !file}

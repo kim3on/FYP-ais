@@ -118,7 +118,7 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                           onClick={() => onBlockIP && onBlockIP(a.src_ip, a.attack_type)}
                           title={`Block ${a.src_ip}`}
                         >
-                          LOCKED DOWN
+                          Block IP
                         </button>
                       )}
                     </div>

@@ -2,75 +2,197 @@
   "nsa_summary": {
     "status": "fitted",
     "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
-    "r": 1.333540678024292,
-    "r_s": 1.333540678024292,
-    "max_detectors": 60,
-    "n_self_samples": 60,
-    "self_match_cap": 60,
-    "n_features": 39,
-    "attempts": 60,
+    "r": 1.8239938020706177,
+    "r_s": 0.01,
+    "max_detectors": 1500,
+    "n_self_samples": 12000,
+    "self_match_cap": 3000,
+    "n_features": 25,
+    "attempts": 1500,
     "candidates_rejected": 0,
     "candidates_rejected_overlap": 0,
-    "mature_detectors": 60,
-    "det_radius_min": 0.3515012869659111,
-    "det_radius_max": 3.151022598365943,
-    "det_radius_mean": 1.5263500539192565,
+    "candidate_strategy": "expanded_pca_tail_envelope_plus_centroid_and_boundary_mutation",
+    "mature_detectors": 1500,
+    "det_radius_min": 1.2654978778601638,
+    "det_radius_max": 6.941850655693238,
+    "det_radius_mean": 3.1794623523869654,
+    "performance_profile": "laptop",
+    "self_ref_cap": 3000,
+    "distance_matrix_entry_budget": 4000000,
     "auto_threshold": true,
-    "r_fitted": 1.333541,
-    "r_s_fitted": 1.333541,
-    "score_threshold": 1.22717658162117,
-    "target_fpr": 0.01,
+    "r_fitted": 1.823994,
+    "r_s_fitted": 0.01,
+    "score_threshold": 0.46287399530410767,
+    "fusion_threshold": 0.026484118368137924,
+    "target_fpr": 0.05,
     "calibration": {
       "mode": "unsupervised_benign",
-      "target_fpr": 0.01,
-      "observed_fpr": 0.05,
-      "normal_pass_rate": 0.95,
-      "threshold": 1.227177,
-      "score_scale": 1.840765,
-      "n_calibration_samples": 20,
-      "score_min": 0.984188,
-      "score_median": 1.108228,
-      "score_p95": 1.224367,
-      "score_p99": 1.227177,
-      "score_max": 1.227879
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04975,
+      "normal_pass_rate": 0.95025,
+      "threshold": 0.462874,
+      "score_scale": 5.29253,
+      "n_calibration_samples": 4000,
+      "rank_index": 3801,
+      "rank_index_zero_based": 3800,
+      "calibration_reliability": "stable",
+      "decision_rule": "score > threshold",
+      "score_min": 0.0,
+      "score_median": 0.003444,
+      "score_p95": 0.456171,
+      "score_p99": 2.174951,
+      "score_max": 19.186527
     },
-    "trained_at": "2026-05-11T14:07:39.562322+00:00",
-    "active_antibodies": 60
+    "fusion_calibration": {
+      "mode": "unsupervised_benign_score_fusion",
+      "score_mode": "weighted_fusion",
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04975,
+      "normal_pass_rate": 0.95025,
+      "threshold": 0.026484,
+      "score_scale": 0.169703,
+      "n_calibration_samples": 4000,
+      "rank_index": 3801,
+      "rank_index_zero_based": 3800,
+      "calibration_reliability": "stable",
+      "decision_rule": "score > threshold",
+      "density_k": 5,
+      "component_weights": {
+        "detector": 0.4,
+        "distance": 0.25,
+        "density": 0.2,
+        "self_boundary": 0.15
+      },
+      "component_scales": {
+        "distance": 19.186527,
+        "density": 22.177746,
+        "detector": 1.0,
+        "self_boundary": 0.664022
+      },
+      "score_min": 1e-06,
+      "score_median": 0.000131,
+      "score_p95": 0.026191,
+      "score_p99": 0.095096,
+      "score_max": 0.6
+    },
+    "trained_at": "2026-05-15T13:00:01.002092+00:00",
+    "fusion_weights": {
+      "detector": 0.4,
+      "distance": 0.25,
+      "density": 0.2,
+      "self_boundary": 0.15
+    },
+    "fusion_component_scales": {
+      "distance": 19.186527,
+      "density": 22.177746,
+      "detector": 1.0,
+      "self_boundary": 0.664022
+    },
+    "active_antibodies": 1500
   },
   "iso_summary": {
     "status": "fitted",
     "algorithm": "Isolation Forest",
     "contamination": 0.05,
     "n_estimators": 100,
-    "n_training_samples": 60,
-    "n_features": 39,
-    "trained_at": "2026-05-11T14:07:39.735864"
+    "n_training_samples": 12000,
+    "n_features": 25,
+    "trained_at": "2026-05-15T13:00:02.216285"
+  },
+  "sb_summary": {
+    "status": "fitted",
+    "algorithm": "Quantile Fence Self-Boundary (AIS Innate Immune)",
+    "boundary_mode": "quantile_fence",
+    "lower_quantile": 0.005,
+    "upper_quantile": 0.995,
+    "z_threshold": 2.0,
+    "min_violations_ratio": 0.15,
+    "score_mode": "weighted_feature_violation",
+    "n_features_modelled": 77,
+    "n_constant_features": 12,
+    "n_training_samples": 12000,
+    "weighted_threshold": 0.02990609432154476,
+    "weighted_calibration": {
+      "mode": "unsupervised_benign_weighted_self_boundary",
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04975,
+      "normal_pass_rate": 0.95025,
+      "threshold": 0.029906,
+      "n_calibration_samples": 4000,
+      "rank_index": 3801,
+      "rank_index_zero_based": 3800,
+      "calibration_reliability": "stable",
+      "decision_rule": "score > threshold",
+      "score_min": 0.0,
+      "score_median": 0.0,
+      "score_p95": 0.029885,
+      "score_p99": 0.189032,
+      "score_max": 0.664022
+    }
   },
   "nsa_eval": {
-    "model_name": "AIS (NSA)",
-    "accuracy": 1.0,
+    "model_name": "AIS (Fused NSA + Self-Boundary)",
+    "accuracy": 0.8932,
     "precision": null,
     "recall": null,
     "f1": null,
     "tp": 0,
-    "tn": 20,
-    "fp": 0,
+    "tn": 3573,
+    "fp": 427,
     "fn": 0,
-    "false_positive_rate": 0.0,
+    "false_positive_rate": 0.1067,
     "false_negative_rate": null,
     "detection_rate": null,
     "true_positive_rate": null,
     "per_category": {
       "normal": {
-        "correct": 20,
-        "total": 20,
-        "rate": 1.0
+        "correct": 3573,
+        "total": 4000,
+        "rate": 0.8932
       }
     },
-    "n_samples": 20,
+    "n_samples": 4000,
     "n_attacks": 0,
-    "n_normal": 20,
-    "evaluated_at": "2026-05-11T14:07:39.771512",
+    "n_normal": 4000,
+    "evaluated_at": "2026-05-15T13:00:03.653882",
+    "metric_assessment": {
+      "recall": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_negative_rate": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "precision": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "f1": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_positive_rate": {
+        "grade": "needs_improvement",
+        "desired_range": [
+          0.03,
+          0.06
+        ],
+        "acceptable_range": [
+          0.06,
+          0.1
+        ],
+        "value": 0.1067
+      }
+    },
     "metric_explanations": {
       "tp": "True Positives: attack flows correctly flagged as anomalies.",
       "tn": "True Negatives: benign flows correctly passed as normal.",
@@ -87,44 +209,173 @@
     },
     "labelled_attack_metrics_applicable": false,
     "training_metric_note": "Benign-only training validation has no attack class; precision, recall, F1, TPR, and FNR are intentionally not reported here.",
-    "self_intrusion_rate": 0.0,
-    "silhouette_score": null,
+    "self_intrusion_rate": 0.1067,
+    "self_intrusion_assessment": {
+      "grade": "needs_improvement",
+      "desired_range": [
+        0.0,
+        0.05
+      ],
+      "acceptable_range": [
+        0.05,
+        0.1
+      ],
+      "value": 0.1067
+    },
+    "silhouette_score": 0.6831,
     "silhouette": {
-      "value": null,
-      "applicable": false,
-      "reason": "Only one predicted class; Silhouette Score is not applicable.",
-      "n_samples": 20,
+      "value": 0.6831,
+      "applicable": true,
+      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "n_samples": 2000,
       "groups": {
-        "0": 20
+        "0": 1799,
+        "1": 201
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     }
   },
-  "iso_eval": {
-    "model_name": "Isolation Forest",
-    "accuracy": 1.0,
+  "nsa_only_eval": {
+    "model_name": "AIS (NSA)",
+    "accuracy": 0.9018,
     "precision": null,
     "recall": null,
     "f1": null,
     "tp": 0,
-    "tn": 20,
-    "fp": 0,
+    "tn": 3607,
+    "fp": 393,
     "fn": 0,
-    "false_positive_rate": 0.0,
+    "false_positive_rate": 0.0983,
     "false_negative_rate": null,
     "detection_rate": null,
     "true_positive_rate": null,
     "per_category": {
       "normal": {
-        "correct": 20,
-        "total": 20,
-        "rate": 1.0
+        "correct": 3607,
+        "total": 4000,
+        "rate": 0.9018
       }
     },
-    "n_samples": 20,
+    "n_samples": 4000,
     "n_attacks": 0,
-    "n_normal": 20,
-    "evaluated_at": "2026-05-11T14:07:39.780173",
+    "n_normal": 4000,
+    "evaluated_at": "2026-05-15T13:00:03.649358",
+    "metric_assessment": {
+      "recall": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_negative_rate": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "precision": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "f1": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_positive_rate": {
+        "grade": "prototype_acceptable",
+        "desired_range": [
+          0.03,
+          0.06
+        ],
+        "acceptable_range": [
+          0.06,
+          0.1
+        ],
+        "value": 0.0983
+      }
+    },
+    "metric_explanations": {
+      "tp": "True Positives: attack flows correctly flagged as anomalies.",
+      "tn": "True Negatives: benign flows correctly passed as normal.",
+      "fp": "False Positives: benign flows incorrectly flagged as anomalies.",
+      "fn": "False Negatives: attack flows missed as normal.",
+      "recall": "Recall / Detection Rate / TPR: percentage of real attacks caught. Main IDS metric.",
+      "false_negative_rate": "FNR: percentage of real attacks missed. Lower is better.",
+      "false_positive_rate": "FPR: percentage of benign flows incorrectly alerted. Lower is better.",
+      "precision": "Precision: percentage of alerts that are true attacks.",
+      "f1": "F1-score: harmonic mean of precision and recall.",
+      "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
+    }
+  },
+  "iso_eval": {
+    "model_name": "Isolation Forest",
+    "accuracy": 0.944,
+    "precision": null,
+    "recall": null,
+    "f1": null,
+    "tp": 0,
+    "tn": 3776,
+    "fp": 224,
+    "fn": 0,
+    "false_positive_rate": 0.056,
+    "false_negative_rate": null,
+    "detection_rate": null,
+    "true_positive_rate": null,
+    "per_category": {
+      "normal": {
+        "correct": 3776,
+        "total": 4000,
+        "rate": 0.944
+      }
+    },
+    "n_samples": 4000,
+    "n_attacks": 0,
+    "n_normal": 4000,
+    "evaluated_at": "2026-05-15T13:00:03.658742",
+    "metric_assessment": {
+      "recall": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_negative_rate": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "precision": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "f1": {
+        "grade": "not_applicable",
+        "desired_range": null,
+        "acceptable_range": null,
+        "value": null
+      },
+      "false_positive_rate": {
+        "grade": "target_met",
+        "desired_range": [
+          0.03,
+          0.06
+        ],
+        "acceptable_range": [
+          0.06,
+          0.1
+        ],
+        "value": 0.056
+      }
+    },
     "metric_explanations": {
       "tp": "True Positives: attack flows correctly flagged as anomalies.",
       "tn": "True Negatives: benign flows correctly passed as normal.",
@@ -141,115 +392,260 @@
     },
     "labelled_attack_metrics_applicable": false,
     "training_metric_note": "Benign-only training validation has no attack class; precision, recall, F1, TPR, and FNR are intentionally not reported here.",
-    "silhouette_score": null,
+    "silhouette_score": 0.7585,
     "silhouette": {
-      "value": null,
-      "applicable": false,
-      "reason": "Only one predicted class; Silhouette Score is not applicable.",
-      "n_samples": 20,
+      "value": 0.7585,
+      "applicable": true,
+      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "n_samples": 2000,
       "groups": {
-        "0": 20
+        "0": 1892,
+        "1": 108
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     }
   },
   "comparison": {
     "models": [
-      "AIS (NSA)",
+      "AIS (Fused NSA + Self-Boundary)",
       "Isolation Forest"
     ],
     "metrics": {
       "accuracy": {
-        "AIS (NSA)": 1.0,
-        "Isolation Forest": 1.0
+        "AIS (Fused NSA + Self-Boundary)": 0.89325,
+        "Isolation Forest": 0.944
       },
       "precision": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       },
       "recall": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       },
       "f1": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       },
       "false_positive_rate": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": 0.10675,
+        "Isolation Forest": 0.056
       },
       "false_negative_rate": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       },
       "detection_rate": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       },
       "true_positive_rate": {
-        "AIS (NSA)": 0.0,
-        "Isolation Forest": 0.0
+        "AIS (Fused NSA + Self-Boundary)": null,
+        "Isolation Forest": null
       }
     },
     "winners": {
-      "accuracy": "AIS (NSA)",
-      "precision": "AIS (NSA)",
-      "recall": "AIS (NSA)",
-      "f1": "AIS (NSA)",
-      "false_positive_rate": "AIS (NSA)",
-      "false_negative_rate": "AIS (NSA)",
-      "detection_rate": "AIS (NSA)",
-      "true_positive_rate": "AIS (NSA)"
+      "accuracy": "Isolation Forest",
+      "precision": null,
+      "recall": null,
+      "f1": null,
+      "false_positive_rate": "Isolation Forest",
+      "false_negative_rate": null,
+      "detection_rate": null,
+      "true_positive_rate": null
     }
   },
   "validation_stats": {
-    "total_records": 130,
-    "normal_records": 100,
-    "attack_records": 30,
-    "normal_pct": 76.9,
-    "attack_pct": 23.1,
+    "total_records": 458831,
+    "normal_records": 458831,
+    "attack_records": 0,
+    "normal_pct": 100.0,
+    "attack_pct": 0.0,
     "n_features": 77,
     "attack_categories": {
-      "normal": 100,
-      "DoS": 10,
-      "DDoS": 10,
-      "Probe": 10
+      "normal": 458831
     },
     "dataset": "CIC-IDS-2017"
   },
-  "validation_mode": "unsupervised_benign_calibrated",
+  "validation_mode": "strict_unsupervised_benign_fusion_calibrated",
+  "benign_row_limit": 20000,
+  "benign_rows_available": 458831,
+  "benign_rows_used": 20000,
+  "training_warnings": [],
   "calibration_summary": {
+    "mode": "unsupervised_benign_score_fusion",
+    "score_mode": "weighted_fusion",
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04975,
+    "normal_pass_rate": 0.95025,
+    "threshold": 0.026484,
+    "score_scale": 0.169703,
+    "n_calibration_samples": 4000,
+    "rank_index": 3801,
+    "rank_index_zero_based": 3800,
+    "calibration_reliability": "stable",
+    "decision_rule": "score > threshold",
+    "density_k": 5,
+    "component_weights": {
+      "detector": 0.4,
+      "distance": 0.25,
+      "density": 0.2,
+      "self_boundary": 0.15
+    },
+    "component_scales": {
+      "distance": 19.186527,
+      "density": 22.177746,
+      "detector": 1.0,
+      "self_boundary": 0.664022
+    },
+    "score_min": 1e-06,
+    "score_median": 0.000131,
+    "score_p95": 0.026191,
+    "score_p99": 0.095096,
+    "score_max": 0.6
+  },
+  "nsa_calibration_summary": {
     "mode": "unsupervised_benign",
-    "target_fpr": 0.01,
-    "observed_fpr": 0.05,
-    "normal_pass_rate": 0.95,
-    "threshold": 1.227177,
-    "score_scale": 1.840765,
-    "n_calibration_samples": 20,
-    "score_min": 0.984188,
-    "score_median": 1.108228,
-    "score_p95": 1.224367,
-    "score_p99": 1.227177,
-    "score_max": 1.227879
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04975,
+    "normal_pass_rate": 0.95025,
+    "threshold": 0.462874,
+    "score_scale": 5.29253,
+    "n_calibration_samples": 4000,
+    "rank_index": 3801,
+    "rank_index_zero_based": 3800,
+    "calibration_reliability": "stable",
+    "decision_rule": "score > threshold",
+    "score_min": 0.0,
+    "score_median": 0.003444,
+    "score_p95": 0.456171,
+    "score_p99": 2.174951,
+    "score_max": 19.186527
+  },
+  "self_boundary_calibration_summary": {
+    "mode": "unsupervised_benign_weighted_self_boundary",
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04975,
+    "normal_pass_rate": 0.95025,
+    "threshold": 0.029906,
+    "n_calibration_samples": 4000,
+    "rank_index": 3801,
+    "rank_index_zero_based": 3800,
+    "calibration_reliability": "stable",
+    "decision_rule": "score > threshold",
+    "score_min": 0.0,
+    "score_median": 0.0,
+    "score_p95": 0.029885,
+    "score_p99": 0.189032,
+    "score_max": 0.664022
+  },
+  "post_run_labelled_verification": {
+    "available": false,
+    "reason": "No labelled attack rows were available for post-run verification.",
+    "verification_mode": "post_run_labelled_verification",
+    "verification_only": true
   },
   "ais_metrics": {
-    "self_intrusion_rate": 0.0,
-    "self_intrusion_rate_pct": 0.0,
+    "self_intrusion_rate": 0.1067,
+    "self_intrusion_rate_pct": 10.67,
+    "self_intrusion_assessment": {
+      "grade": "needs_improvement",
+      "desired_range": [
+        0.0,
+        0.05
+      ],
+      "acceptable_range": [
+        0.05,
+        0.1
+      ],
+      "value": 0.1067
+    },
     "explanation": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
   },
   "unsupervised_validation": {
     "silhouette": {
-      "value": null,
-      "applicable": false,
-      "reason": "Only one predicted class; Silhouette Score is not applicable.",
-      "n_samples": 20,
+      "value": 0.6831,
+      "applicable": true,
+      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "n_samples": 2000,
       "groups": {
-        "0": 20
+        "0": 1799,
+        "1": 201
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     },
-    "silhouette_score": null,
+    "silhouette_score": 0.6831,
+    "source_decomposition": {
+      "available": true,
+      "verification_only": true,
+      "n_samples": 4000,
+      "n_attacks": 0,
+      "n_benign": 4000,
+      "sources": {
+        "v_detector": {
+          "count": 361,
+          "tp": 0,
+          "fp": 361,
+          "recall": null,
+          "false_positive_rate": 0.0902
+        },
+        "self_gap": {
+          "count": 34,
+          "tp": 0,
+          "fp": 34,
+          "recall": null,
+          "false_positive_rate": 0.0085
+        },
+        "nsa_score": {
+          "count": 198,
+          "tp": 0,
+          "fp": 198,
+          "recall": null,
+          "false_positive_rate": 0.0495
+        },
+        "score_fusion": {
+          "count": 175,
+          "tp": 0,
+          "fp": 175,
+          "recall": null,
+          "false_positive_rate": 0.0437
+        },
+        "fusion_only": {
+          "count": 44,
+          "tp": 0,
+          "fp": 44,
+          "recall": null,
+          "false_positive_rate": 0.011
+        }
+      },
+      "overlaps": {
+        "D": 361,
+        "G": 34,
+        "F": 175,
+        "D_and_G": 12,
+        "D_and_F": 109,
+        "G_and_F": 34,
+        "D_and_G_and_F": 12,
+        "F_only": 44
+      },
+      "legend": {
+        "D": "mature V-detector match",
+        "G": "self-gap fallback",
+        "F": "fused-score threshold"
+      }
+    },
+    "silhouette_assessment": {
+      "grade": "target_met",
+      "desired_range": [
+        0.35,
+        0.65
+      ],
+      "acceptable_range": [
+        0.2,
+        0.35
+      ],
+      "value": 0.6831
+    },
     "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
   },
   "metric_explanations": {
@@ -266,7 +662,8 @@
     "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
     "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
   },
-  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit PCA/scaler, train detectors, or tune thresholds.",
-  "duration_seconds": 0.38,
-  "trained_at": "2026-05-11T22:07:39.458407"
+  "detection_architecture": "two_layer_ais_score_fusion",
+  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit PCA/scaler, train detectors, train self-boundary, calibrate fusion weights/scales, or tune thresholds.",
+  "duration_seconds": 6.35,
+  "trained_at": "2026-05-15T20:59:57.506819"
 }

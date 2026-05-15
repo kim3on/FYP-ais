@@ -9,6 +9,11 @@ Set-Location $PSScriptRoot
 
 Write-Host "`n[AIS-Detect] Initiating system startup..." -ForegroundColor Cyan
 
+# Keep Python/scikit-learn logs stable on Windows.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+$env:LOKY_MAX_CPU_COUNT = [string]([Environment]::ProcessorCount)
+
 # ── 1. Backend Environment Setup ─────────────────────────────────────
 Write-Host "[1/4] Checking Python environment..." -ForegroundColor Gray
 
@@ -35,7 +40,15 @@ if (-not (Test-Path "frontend\node_modules")) {
 
 # ── 3. Launch Backend ────────────────────────────────────────────────
 Write-Host "[3/4] Launching FastAPI Backend (Port 8000)..." -ForegroundColor Green
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$PSScriptRoot'; .\.venv\Scripts\activate; uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -WindowStyle Normal
+$backendCommand = @"
+`$env:PYTHONUTF8='1';
+`$env:PYTHONIOENCODING='utf-8';
+`$env:LOKY_MAX_CPU_COUNT='$env:LOKY_MAX_CPU_COUNT';
+Set-Location '$PSScriptRoot';
+.\.venv\Scripts\activate;
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+"@
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendCommand -WindowStyle Normal
 
 # ── 4. Launch Frontend ───────────────────────────────────────────────
 Write-Host "[4/4] Launching React Dev Server (Port 5173)..." -ForegroundColor Green

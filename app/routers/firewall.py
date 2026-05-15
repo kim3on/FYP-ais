@@ -6,8 +6,9 @@ POST /api/firewall/unblock     — remove a block rule
 GET  /api/firewall/blocked     — list all currently blocked IPs
 """
 
+import ipaddress
+import logging
 import subprocess
-import re
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ router = APIRouter(
     tags=["firewall"],
     dependencies=[Depends(get_current_user)]
 )
+logger = logging.getLogger(__name__)
 
 # ── In-memory blocked IP registry ────────────────────────────────────
 _blocked_ips: dict = {}   # { ip: { blocked_at, reason, rule_name } }
@@ -40,11 +42,15 @@ class UnblockRequest(BaseModel):
 
 
 def _sanitise_ip(ip: str) -> str:
-    """Basic validation — only allow dotted-decimal IPv4."""
-    ip = ip.strip()
-    if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+    """Validate and normalize dotted-decimal IPv4 addresses."""
+    try:
+        parsed = ipaddress.ip_address(ip.strip())
+    except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid IPv4 address: {ip}")
-    return ip
+
+    if parsed.version != 4:
+        raise HTTPException(status_code=400, detail=f"Invalid IPv4 address: {ip}")
+    return str(parsed)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -134,10 +140,14 @@ async def unblock_ip(req: UnblockRequest, db: Session = Depends(get_db)):
 
         if result.returncode != 0:
             # Rule may have been manually deleted — still remove from registry
-            pass
+            logger.warning(
+                "Firewall unblock command failed for %s: %s",
+                ip,
+                result.stderr.strip() or result.stdout.strip(),
+            )
 
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass   # best effort — still remove from local registry
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Firewall unblock command could not run for %s: %s", ip, exc)
 
     del _blocked_ips[ip]
 

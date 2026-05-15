@@ -1,460 +1,592 @@
-# AIS-Detect — End-to-End Data Flow
+# AIS-Detect Data Flow
 
-> **Project:** Web-Based Network Anomaly Detection using Artificial Immune Systems (AIS)  
-> **Stack:** FastAPI (Python) · React + Vite (Frontend) · SQLite (SQLAlchemy) · Scapy  
-> **Dataset:** CIC-IDS-2017 (8 CSV files, ~2.8 M rows)
-
----
-
-## System Overview
-
-The system has **two independent operating modes** that share the same trained model artefacts:
-
-| Mode | Entry Point | Use Case |
-|------|-------------|----------|
-| **Training** | User uploads CSV → `/api/train` | Teach the models what "normal" looks like |
-| **Batch Detection** | User uploads CSV → `/api/detect` | Analyse a historical log file offline |
-| **Live Detection** | Start capture → `/api/capture/start` | Real-time packet-level anomaly detection |
+> Project: Web-Based Network Anomaly Detection using Artificial Immune Systems  
+> Backend: FastAPI, Python, SQLite, Scapy  
+> Frontend: React + Vite  
+> Main dataset: CICIDS2017 flow records  
+> Main model: Artificial Immune System using Negative Selection Algorithm / V-Detector NSA  
+> Baseline model: Isolation Forest  
 
 ---
 
-## Phase 1 — Application Startup
+## 1. Architecture Summary
 
+AIS-Detect is a web-based intrusion detection prototype. It has three main workflows:
+
+| Workflow | Purpose |
+|---|---|
+| Training | Learn the profile of benign/self traffic |
+| Batch Detection | Analyse uploaded CICIDS2017-style flow files |
+| Live Capture | Convert live packets into CICIDS2017-style flow features and score them |
+
+The current architecture is strict unsupervised detection:
+
+- NSA trains only on BENIGN/self traffic.
+- RobustScaler and PCA are fitted only on BENIGN training rows.
+- Self-boundary statistics are fitted only on BENIGN training rows.
+- Final anomaly threshold is calibrated only from BENIGN calibration rows.
+- Labels are not used to tune NSA, PCA, scaler, self-boundary, score weights, or thresholds.
+- Labels are used only after detection for verification metrics.
+
+The main output is binary:
+
+```text
+Normal vs Anomaly
 ```
+
+Attack family guessing is a second layer for display only. It does not decide whether a row is anomalous.
+
+---
+
+## 2. Startup Flow
+
+```text
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-1. **FastAPI app factory** (`app/main.py`) is created.
-2. **CORS middleware** is added (allows all origins in dev).
-3. **Seven routers** are registered:
-   - `auth` · `training` · `detection` · `alerts` · `capture` · `dashboard` · `firewall`
-4. **`on_startup` event** runs:
-   - `Base.metadata.create_all()` — creates SQLite tables (`users`, `alerts`, `blocked_ips`, `raw_flows`) if they don't exist.
-   - Seeds two default users (`admin`, `analyst`) if the `users` table is empty.
-   - Loads any persisted **blocked IPs** from the DB into the in-memory `_blocked_ips` dict.
-5. If `app/static_react/` exists (production build), FastAPI serves the React SPA as static files.
+1. FastAPI starts and registers routers.
+2. SQLite tables are created if missing.
+3. Default users are seeded if the user table is empty.
+4. Existing firewall blocks are loaded into memory.
+5. If `app/static_react/` exists, FastAPI serves the built React dashboard.
 
----
+Main routers:
 
-## Phase 2 — User Authentication
-
-```
-Browser → POST /api/auth/login  { username, password }
-       ← { token, role }
-```
-
-- `app/routers/auth.py` verifies the user against the `users` SQLite table.
-- Passwords are stored as bcrypt hashes, not plaintext.
-- On success, a signed JWT is returned and stored in the frontend React context (`AuthContext`).
-- All subsequent HTTP API calls include `Authorization: Bearer <token>`.
-- Live WebSocket clients pass the same JWT as `/ws/live?token=<token>`; invalid or missing tokens are rejected before the socket is accepted.
-
----
-
-## Phase 3 — Model Training Pipeline
-
-This is the **core learning phase**, analogous to the biological thymus educating T-cells.
-
-### 3.1 Dataset Upload
-
-```
-User selects CSV (e.g. Wednesday-workingHours.pcap_ISCX.csv)
-Browser → POST /api/train  (multipart/form-data, ~225 MB)
-        ← { message: "Training started", status: "learning" }
-```
-
-- `app/routers/training.py` reads the file bytes into memory.
-- Sets `_state["status"] = "learning"`.
-- Dispatches `run_training()` as a **FastAPI BackgroundTask** — returns immediately to the client.
-- Frontend polls `GET /api/train/logs` every second to stream progress.
-
-### 3.2 TrainingPipeline.run() — `app/core/pipeline.py`
-
-```
-dataset_bytes
-    │
-    ▼
-CICIDSPreprocessor._load()          ← Step 1: Parse CSV / Parquet
-    │
-    ▼
-_find_label_col() + _encode_labels() ← Step 2: Binary labels (0=BENIGN, 1=Attack)
-    │                                            + attack_category column
-    ▼
-train_test_split(stratify=y)         ← Step 3: 80/20 split on RAW data
-    │                                            (prevents data leakage)
-    ├── df_train_raw  (80%)
-    └── df_test_raw   (20%)
-    │
-    ▼
-CICIDSPreprocessor.fit(df_train_raw) ← Step 4: Fit RobustScaler + PCA on training set ONLY
-    │
-    ▼
-preprocessor.transform_df()          ← Step 5: Transform both train & test into PCA feature space
-    │                                            RobustScaler → PCA(whiten=True)
-    ├── X_train  (float32 array)
-    └── X_test   (float32 array)
-    │
-    ├──▶ NegativeSelectionDetector.fit(X_train_normal)   ← Step 6a: Train NSA
-    │        Only BENIGN rows (y_train == 0) are used
-    │
-    └──▶ IsolationForestDetector.fit(X_train)            ← Step 6b: Train IsoForest
-             All rows (semi-supervised)
-    │
-    ▼
-evaluate_model() on X_test           ← Step 7: F1, Precision, Recall, ROC-AUC
-    │
-    ▼
-nsa.save()  iso.save()  preprocessor.save()  ← Step 8: Persist .pkl artefacts
-    │                                                     to app/artefacts/
-    ▼
-last_train_result.json               ← Step 9: Dashboard reads this on reload
-_state["status"] = "active"
-```
-
-### 3.3 CIC-IDS-2017 Preprocessing — `app/core/preprocessor.py`
-
-| Step | Action |
-|------|--------|
-| Load | Read CSV/Parquet; strip column name whitespace |
-| Label encode | `BENIGN` → 0, all attacks → 1; map to `attack_category` |
-| Drop metadata | Remove `Flow ID`, `Source IP`, `Destination IP`, `Timestamp` |
-| Dedup columns | Drop second occurrence of `Fwd Header Length` |
-| Fix quality | Replace `±Inf` → NaN → 0; clip to `±1e12` |
-| Select numeric | Drop any remaining non-numeric columns |
-| Scale | `RobustScaler` reduces outlier impact using median/IQR |
-| Reduce dimensions | `PCA(whiten=True)` projects features into balanced PCA space |
-
-### 3.4 NSA V-Detector Training — `app/models/nsa.py`
-
-The Negative Selection Algorithm mimics thymus T-cell education:
-
-```
-X_train_normal  (BENIGN samples only)
-    │
-    ▼
-Build self-reference set (cap at 5,000 points via random sample)
-    │
-    ▼
-Auto-calibrate thresholds from benign PCA-space distances
-    │   r   = high-percentile self-distance threshold
-    │   r_s = high-percentile nearest-neighbour self-tolerance margin
-    │
-    ▼
-KMeans(50 clusters) on self → cluster centroids
-    │
-    ▼
-Candidate generation loop (default max_attempts = 30,000):
-    │
-    ├── Phase 1 (first half of detector target):
-    │       candidate = centroid + Normal(0, r×3.0)   [Smart sampling]
-    │
-    └── Phase 2 (remaining detector target):
-            candidate = self_point + Normal(0, r×1.5) [Boundary mutation]
-            (no [0,1] clipping; candidates live in PCA space)
-    │
-    ▼
-Negative Selection Filter:
-    dist_to_nearest_self < r_s  →  REJECT  (reacts to self → clonal deletion)
-    dist_to_nearest_self ≥ r_s  →  ACCEPT  (mature detector)
-    │
-    ▼
-V-Detector radius = dist_to_nearest_self − r_s
-    (variable radius gives multi-scale coverage of non-self space)
-    │
-    ▼
-Inter-detector spacing check → reject candidates too close to existing detectors
-    │
-    ▼
-Mature detector repertoire: up to 1,000 V-detectors by API default
-Aging counters initialised (match_counts, idle_batches)
-```
-
----
-
-## Phase 4 — Batch Detection (Offline CSV Analysis)
-
-```
-User uploads network log CSV
-Browser → POST /api/detect  (multipart/form-data)
-        ← { message: "Detection started", status: "running" }
-```
-
-```
-dataset_bytes
-    │
-    ▼
-_build_engine()                      ← Load NSA/IsoForest + preprocessor from .pkl
-    │
-    ▼
-DetectionEngine.detect_from_csv()    ← app/core/detection.py
-    │
-    ▼
-preprocessor.transform()             ← Clean + transform using FITTED scaler/PCA (no refit)
-    │   Preserves: Destination Port, Protocol, attack_category for heuristics
-    ▼
-model.predict_with_details(X_scaled) ← NSA or IsoForest inference
-    │
-    ├── NSA: Detector match  →  sample inside any V-detector sphere?
-    │         Self-gap check →  dist_to_self > r  (innate immune fallback)
-    │         Label = 1 if EITHER is true
-    │
-    └── IsoForest: sklearn anomaly_score < threshold → label = 1
-    │
-    ▼
-_build_result()                      ← For each anomalous sample:
-    │   severity_from_score()  →  critical / high / medium / low
-    │   _infer_attack_type()   →  2-stage classifier:
-    │       Stage 1: known label (DoS, DDoS, Probe, Brute Force, Web Attack…)
-    │       Stage 2: flow-feature heuristics (12 rules, rule order matters)
-    │       Fallback: Zero-Day Candidate (novelty_score ≥ 0.65)
-    │   Build AlertRecord (alert_id, timestamp, src_ip, dst_ip, severity…)
-    │
-    ▼
-_state["alerts"].extend(alerts)      ← Merge into in-memory alert log
-AlertDB records written to SQLite    ← Persistent storage
-    │
-    ▼
-GET /api/detect/result               ← Frontend retrieves final summary
-Dashboard / Alerts page updated
-```
-
----
-
-## Phase 5 — Live Packet Capture & Real-Time Detection
-
-This is the **streaming mode** — packets are sniffed, assembled into flows, scored, and pushed to authenticated browser clients over WebSocket.
-
-### 5.1 Start Capture
-
-```
-Browser → POST /api/capture/start?interface=eth0
-        ← { status: "capturing" }
-```
-
-Prerequisites: `models_ready()` must be true (artefacts exist on disk), and the request must include a valid JWT.
-
-### 5.2 Packet → Flow → Feature → Alert Pipeline
-
-```
-Network Interface (raw socket)
-    │
-    ▼ Scapy sniff() — background thread ("pkt-sniffer")
-    │
-    ▼
-FlowAggregator.ingest(raw_pkt)       ← app/core/capture.py
-    │   Parse IP/TCP/UDP headers → PacketRecord
-    │   Group by 5-tuple: (src_ip, dst_ip, src_port, dst_port, proto)
-    │   Bidirectional: fwd packet if fid matches, bwd if reverse matches
-    │
-    ▼  Flow completion triggers (any of):
-    │   • TCP FIN / RST flag seen
-    │   • Idle > 30 seconds (reaper thread every 5 s)
-    │   • Accumulated > 1,000 packets
-    │
-    ▼
-FlowFeatureExtractor.extract(flow)   ← Computes all 77 CIC-IDS-2017 features:
-    │   Packet length stats (mean, std, min, max)
-    │   IAT (inter-arrival times) — forward, backward, combined
-    │   TCP flag counts (SYN, ACK, FIN, RST, PSH, URG, CWE, ECE)
-    │   Byte/packet rates (Flow Bytes/s, Flow Packets/s)
-    │   Active / Idle periods
-    │   Window sizes, header lengths, subflow stats
-    │   + _src_ip, _dst_ip, _src_port, _dst_port, _protocol metadata
-    │
-    ▼
-on_flow() callback (capture router)
-    │   Pop metadata keys → meta dict
-    │   DetectionEngine.detect_sample(features)  ← same engine as batch mode
-    │
-    ▼
-Result → update _state counters
-    │   Write RawFlowDB to SQLite
-    │   If anomaly: write AlertDB, append to _state["alerts"]
-    │   Update chart ring buffer (60-point sliding window)
-    │
-    ▼
-asyncio.run_coroutine_threadsafe(
-    _broadcast_live_update(), loop
-)
-    │
-    ▼  WebSocket push to all connected browsers
-WS /ws/live?token=<jwt>  →  { type: "flow", data: { anomalies_found, alerts, chart_... } }
-    │
-    ▼
-React Dashboard (LiveCapturePage / Dashboard.jsx)
-    WebSocket handler updates state → chart re-renders, alert table appends
-```
-
-### 5.3 WebSocket Protocol
-
-| Message Type | Direction | Payload |
-|---|---|---|
-| `snapshot` | Server → Client | Full current state on connect |
-| `flow` | Server → Client | Per-flow detection result + chart delta |
-| `ping` | Server → Client | Keepalive (every 30 s timeout) |
-| `ping` | Client → Server | Client keepalive |
-| `pong` | Server → Client | Reply to client ping |
-
----
-
-## Phase 6 — Alert Management & Firewall Response
-
-### Alert Lifecycle
-
-```
-AlertRecord generated by DetectionEngine
-    │
-    ├── Stored in _state["alerts"]  (in-memory, lost on restart)
-    └── Stored in AlertDB (SQLite)  (persistent)
-    │
-    ▼
-GET /api/alerts          ← Alerts page fetches paginated list
-PATCH /api/alerts/{id}   ← Analyst marks as false positive
-GET /api/alerts/export.csv ← Analyst exports CSV with risk_score, repeat counts, recommended_action
-    │
-    ▼
-User reviews alert → clicks "Block IP"
-    │
-    ▼
-POST /api/firewall/block  { ip: "x.x.x.x" }
-    │
-    ▼
-PowerShell: New-NetFirewallRule  (Windows Firewall inbound block)
-    │
-    ▼
-_blocked_ips dict updated + BlockedIPDB written to SQLite
-GET /api/firewall/blocked ← Firewall management page lists active blocks
-```
-
----
-
-## Phase 7 — Dashboard & Settings
-
-### Dashboard Data Sources (`app/routers/dashboard.py`)
-
-| Endpoint | Data |
+| Router | Responsibility |
 |---|---|
-| `GET /api/system/status` | CPU, RAM, uptime, model status |
-| `GET /api/dashboard/stats` | Total alerts, anomaly rate, severity breakdown |
-| `GET /api/model/summary` | NSA detector count, radius stats, IsoForest contamination |
-| `GET /health` | Simple liveness probe |
-
-### Settings (`PATCH /api/settings`)
-
-- Switch active model between `nsa` and `isolation_forest`
-- Updates `_state["active_model"]`; next detection call uses the new model
+| `auth` | Login, JWT authentication |
+| `training` | Dataset upload, model training, training logs |
+| `detection` | Batch detection on uploaded files |
+| `capture` | Live packet capture and WebSocket updates |
+| `alerts` | Alert list, false-positive marking, CSV export |
+| `dashboard` | Status and dashboard summary |
+| `firewall` | Windows Firewall block/unblock |
 
 ---
 
-## Shared Application State — `app/state.py`
+## 3. Authentication Flow
 
-All routers share a single in-memory dict `_state`:
-
-```python
-_state = {
-    "status":           "idle | learning | active | error",
-    "training_logs":    [],          # streamed to frontend
-    "alerts":           [],          # in-memory alert log
-    "active_model":     "nsa",       # or "isolation_forest"
-    "packet_count":     0,
-    "anomaly_count":    0,
-    "capture_active":   False,
-    "sniffer":          None,        # PacketSniffer instance
-    "ws_clients":       [],          # active WebSocket connections
-    "chart_normal":     [0]*60,      # 60-point ring buffer
-    "chart_anomaly":    [0]*60,
-    "flows_completed":  0,
-    "detect_status":    "idle | running | done | error",
-    "last_detect_result": None,
-}
+```text
+Browser
+  -> POST /api/auth/login
+  <- JWT token + role
 ```
 
-`_build_engine()` constructs a `DetectionEngine` on demand by loading the `.pkl` artefacts from disk.
+- Passwords are checked against bcrypt hashes in SQLite.
+- The frontend stores the JWT in React context.
+- HTTP calls send `Authorization: Bearer <token>`.
+- WebSocket clients connect using `/ws/live?token=<jwt>`.
+- Invalid WebSocket tokens are rejected before the socket is accepted.
 
 ---
 
-## Persisted Artefacts — `app/artefacts/`
+## 4. Training Data Flow
 
-| File | Contents |
+Training is the main immune-system learning phase. It teaches the system what normal/self traffic looks like.
+
+### 4.1 Upload
+
+```text
+Browser
+  -> POST /api/train
+  <- "Training started"
+```
+
+The backend:
+
+1. Reads uploaded CSV or Parquet bytes.
+2. Sets system status to `learning`.
+3. Starts `TrainingPipeline.run()` as a background task.
+4. Streams progress through `GET /api/train/logs`.
+
+### 4.2 Benign-Only Split
+
+```text
+Uploaded CICIDS2017 file
+    |
+    v
+Load CSV / Parquet
+    |
+    v
+Find Label column
+    |
+    v
+Map Label:
+    BENIGN -> self / normal
+    non-BENIGN -> attack label for reporting only
+    |
+    v
+Keep only BENIGN rows for fitting and calibration
+    |
+    v
+Split BENIGN rows:
+    train       -> fit scaler, PCA, NSA, self-boundary
+    calibration -> calibrate component scales and final threshold
+    test        -> benign holdout FPR / self-intrusion check
+```
+
+Attack rows are not used for model fitting or threshold selection. If the uploaded training file contains attack rows, they are ignored for learning and may only be counted for reporting.
+
+### 4.3 Preprocessing
+
+File: `app/core/preprocessor.py`
+
+```text
+BENIGN train rows
+    |
+    v
+Clean CICIDS2017 columns
+    |
+    v
+Drop metadata columns
+    |
+    v
+Replace inf / NaN
+    |
+    v
+Clip extreme values
+    |
+    v
+Fit RobustScaler on BENIGN train only
+    |
+    v
+Fit PCA(whiten=True) on BENIGN train only
+    |
+    v
+Transform train / calibration / test using fitted scaler + PCA
+```
+
+Important rule:
+
+```text
+No calibration/test/detection rows are used to fit RobustScaler or PCA.
+```
+
+This prevents data leakage.
+
+### 4.4 NSA V-Detector Training
+
+File: `app/models/nsa.py`
+
+```text
+BENIGN train rows in PCA space
+    |
+    v
+Build self-reference set
+    |
+    v
+Estimate benign self-distance statistics
+    |
+    v
+Generate detector candidates around self-space boundaries
+    |
+    v
+Reject candidate if it reacts to self
+    |
+    v
+Accept mature V-detector if it is outside self tolerance
+    |
+    v
+Store detector center + variable radius
+```
+
+NSA detector generation happens in PCA-whitened feature space. The model does not assume `[0, 1]` bounds after PCA.
+
+NSA produces component scores:
+
+| Score | Meaning |
 |---|---|
-| `nsa_model.pkl` | Fitted `NegativeSelectionDetector` (detectors, radii, self-reference) |
-| `iso_model.pkl` | Fitted `IsolationForestDetector` |
-| `preprocessor.pkl` | Fitted `CICIDSPreprocessor` (RobustScaler + PCA + feature_columns_) |
-| `last_train_result.json` | Training metrics (F1, Precision, Recall, duration) |
+| Distance/self-gap score | How far the sample is from known self traffic |
+| Detector-depth score | How strongly the sample falls inside mature detector regions |
+| k-nearest-self density score | Whether the sample is in sparse self-space |
+
+These are continuous scores. They are not final labels by themselves.
+
+### 4.5 Self-Boundary Training
+
+File: `app/models/self_boundary.py`
+
+Self-boundary is a benign-only feature boundary check in the original raw feature space.
+
+```text
+BENIGN train rows in raw feature space
+    |
+    v
+Learn robust per-feature center/spread
+    |
+    v
+Measure how often benign rows violate each feature boundary
+    |
+    v
+Give rarer benign violations higher weight
+    |
+    v
+Produce continuous weighted violation score
+```
+
+This is used as an AIS autoimmunity check: the model should not react too often to benign/self traffic.
+
+### 4.6 Benign-Calibrated Score Fusion
+
+The final AIS anomaly score is a weighted fusion of NSA and self-boundary scores.
+
+```text
+BENIGN calibration rows
+    |
+    v
+NSA component scores
+    + self-boundary weighted score
+    |
+    v
+Scale each component using BENIGN calibration quantiles only
+    |
+    v
+Weighted fusion score
+    |
+    v
+Set final threshold from benign score quantile
+    |
+    v
+Target FPR = 5%
+```
+
+Current score-fusion idea:
+
+```text
+fused_score =
+    weighted NSA distance score
+  + weighted NSA density score
+  + weighted NSA detector-depth score
+  + weighted self-boundary score
+```
+
+The saved threshold is unsupervised because it is selected only from BENIGN calibration scores.
+
+### 4.7 Training Outputs
+
+Training saves:
+
+| Artefact | Purpose |
+|---|---|
+| `app/artefacts/nsa_model.pkl` | NSA detectors, self-reference set, fusion calibration |
+| `app/artefacts/self_boundary.pkl` | Raw feature boundary statistics and weighted score calibration |
+| `app/artefacts/iso_model.pkl` | Isolation Forest baseline |
+| `app/artefacts/preprocessor.pkl` | RobustScaler, PCA, feature schema |
+| `app/artefacts/last_train_result.json` | Dashboard training summary |
+
+Training result JSON includes:
+
+| Field | Meaning |
+|---|---|
+| `validation_mode` | Strict unsupervised benign calibration mode |
+| `target_fpr` | Desired benign false-positive rate |
+| `observed_benign_fpr` | FPR observed on benign calibration/holdout rows |
+| `self_intrusion_rate` | Percentage of benign validation rows flagged as anomaly |
+| `normal_pass_rate` | Percentage of benign rows accepted as normal |
+| `silhouette_score` | Optional separation score for predicted normal/anomaly groups |
+| `fusion_calibration` | Component scales, weights, threshold, score mode |
+
+Training does not report precision, recall, or F1 as training-success metrics because benign-only training has no attack target.
 
 ---
 
-## Database Schema — SQLite (`app/core/database.py`)
+## 5. Batch Detection Flow
+
+File: `app/core/detection.py`
+
+```text
+Browser
+  -> POST /api/detect
+  <- "Detection started"
+```
+
+```text
+Uploaded detection file
+    |
+    v
+Load saved preprocessor, NSA, self-boundary, optional IsoForest
+    |
+    v
+Transform rows using fitted RobustScaler + PCA
+    |
+    v
+Calculate self-boundary weighted scores from raw features
+    |
+    v
+Calculate NSA component scores from PCA features
+    |
+    v
+Apply saved benign-calibrated fusion score
+    |
+    v
+fused_score > threshold -> Anomaly
+fused_score <= threshold -> Normal
+```
+
+The detection file may contain labels, but labels are not read until after predictions are complete.
+
+### 5.1 Layer 1: Unsupervised Binary Detection
+
+Layer 1 decides only:
+
+```text
+Normal or Anomaly
+```
+
+It uses:
+
+- NSA V-detector evidence in PCA space.
+- NSA self-gap/density evidence in PCA space.
+- Self-boundary weighted violation evidence in raw feature space.
+- Saved fusion threshold from benign calibration.
+
+### 5.2 Layer 2: Attack Family Guessing
+
+Layer 2 runs only on rows already flagged as anomalies.
+
+It guesses a likely family using flow-feature heuristics:
+
+```text
+DDoS, DoS, Brute Force, PortScan, Botnet, Web Attack, Infiltration,
+or Zero-Day Candidate
+```
+
+This layer is optional display logic. It does not change TP, FP, FN, TN. A wrong family guess is not counted as a false negative because the main detector is anomaly-based.
+
+### 5.3 Layer 3: Post-Run Labelled Verification
+
+If the uploaded detection file has a label column, the backend computes verification metrics after prediction:
+
+| Metric | Meaning |
+|---|---|
+| TP | Attack rows flagged as anomaly |
+| TN | Benign rows passed as normal |
+| FP | Benign rows flagged as anomaly |
+| FN | Attack rows missed as normal |
+| Recall / TPR | Percentage of attacks caught |
+| FNR | Percentage of attacks missed |
+| FPR | Percentage of benign rows incorrectly alerted |
+| Precision | Percentage of alerts that were true attacks |
+| F1-score | Balance of precision and recall |
+| Accuracy | Report-only; not the main IDS metric |
+
+These metrics are verification only. They are not fed back into the model.
+
+### 5.4 Threshold Trade-Off Analysis
+
+For labelled detection files, the system can also evaluate different score thresholds:
+
+```text
+threshold -> recall, FNR, FPR, precision, F1
+```
+
+This table is report-only. It helps explain the recall/FPR trade-off, but it does not automatically alter the saved unsupervised model threshold.
+
+---
+
+## 6. Live Capture Flow
+
+Live capture uses the same trained artefacts but receives packet-derived flow features instead of uploaded dataset rows.
+
+```text
+Network interface
+    |
+    v
+Scapy sniffer thread
+    |
+    v
+FlowAggregator groups packets by 5-tuple
+    |
+    v
+FlowFeatureExtractor builds CICIDS2017-style features
+    |
+    v
+DetectionEngine.detect_sample()
+    |
+    v
+Normal / Anomaly decision
+    |
+    v
+Update dashboard counters, chart, SQLite, WebSocket clients
+```
+
+Live capture has no ground-truth labels. Therefore live mode can show:
+
+- total flows
+- normal count
+- anomaly count
+- anomaly rate
+- severity counts
+- alert records
+
+Live mode cannot honestly show recall, precision, F1, or FNR because there are no true labels.
+
+---
+
+## 7. Frontend Data Flow
+
+The React dashboard calls the backend API through `frontend/src/api/index.js`.
+
+Main pages:
+
+| Page | Data |
+|---|---|
+| Dashboard | System status, live counters, live traffic graph |
+| Train & Detect | Training upload, detection upload, metrics, logs |
+| Alerts | Alert table, filtering, false-positive marking |
+| Settings | Model/runtime settings, data management, system information |
+
+Training page polling:
+
+```text
+POST /api/train
+GET /api/train/logs
+GET /api/train/result
+```
+
+Detection page polling:
+
+```text
+POST /api/detect
+GET /api/detect/logs
+GET /api/detect/result
+```
+
+Live dashboard:
+
+```text
+POST /api/capture/start
+WS /ws/live?token=<jwt>
+POST /api/capture/stop
+```
+
+---
+
+## 8. Shared State
+
+File: `app/state.py`
+
+The backend keeps runtime state in a shared in-memory dictionary.
+
+Important fields:
+
+| State field | Meaning |
+|---|---|
+| `status` | `idle`, `learning`, `active`, or `error` |
+| `training_logs` | Training log lines streamed to frontend |
+| `detect_logs` | Detection log lines streamed to frontend |
+| `alerts` | In-memory alert list |
+| `active_model` | Current model selection |
+| `capture_active` | Whether live capture is running |
+| `chart_normal` | Live traffic normal-flow ring buffer |
+| `chart_anomaly` | Live traffic anomaly-flow ring buffer |
+| `last_train_result` | Last training output |
+| `last_detect_result` | Last detection output |
+
+SQLite remains the persistent store for users, alerts, blocked IPs, and raw flows.
+
+---
+
+## 9. Database Flow
+
+SQLite tables:
 
 | Table | Purpose |
 |---|---|
-| `users` | id, username, password, role |
-| `alerts` | Full AlertRecord + raw_features JSON |
-| `blocked_ips` | ip, blocked_at, reason, rule_name |
-| `raw_flows` | Lightweight flow log (timestamp, src/dst IP/port, bytes/s) |
+| `users` | Login users and bcrypt password hashes |
+| `alerts` | Persisted anomaly alerts |
+| `blocked_ips` | Firewall block records |
+| `raw_flows` | Lightweight live flow log |
 
----
+Alert flow:
 
-## Complete End-to-End Summary
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  BROWSER (React + Vite, port 5173 dev / static in prod)            │
-│  Login → Dashboard → Train → Detect → Live Capture → Alerts        │
-└────────────────────────┬────────────────────────────────────────────┘
-                         │ HTTP / WebSocket
-                         ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  FASTAPI BACKEND  (port 8000)                                       │
-│                                                                     │
-│  /api/auth       → Auth router     → SQLite users table            │
-│  /api/train      → Training router → TrainingPipeline              │
-│                                         └→ Preprocessor (fit)      │
-│                                         └→ NSA.fit (BENIGN only)   │
-│                                         └→ IsoForest.fit (all)     │
-│                                         └→ Save .pkl artefacts     │
-│                                                                     │
-│  /api/detect     → Detection router → DetectionEngine              │
-│                                         └→ Preprocessor (transform)│
-│                                         └→ NSA / IsoForest predict │
-│                                         └→ _infer_attack_type()    │
-│                                         └→ AlertDB (SQLite)        │
-│                                                                     │
-│  /api/capture    → Capture router                                  │
-│    /start           └→ PacketSniffer (Scapy, background thread)    │
-│                           └→ FlowAggregator (5-tuple grouping)     │
-│                                └→ FlowFeatureExtractor (77 feats)  │
-│                                     └→ DetectionEngine.detect_sample│
-│                                          └→ WS broadcast           │
-│  /ws/live        → Authenticated WebSocket → Browser live updates  │
-│                                                                     │
-│  /api/alerts     → Alert CRUD + false-positive marking             │
-│  /api/firewall   → Windows Firewall block/unblock (PowerShell)     │
-│  /api/dashboard  → System stats, model summary                     │
-└─────────────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  STORAGE LAYER                                                      │
-│  SQLite DB  ─  users / alerts / blocked_ips / raw_flows            │
-│  app/artefacts/  ─  nsa_model.pkl / iso_model.pkl / preprocessor   │
-└─────────────────────────────────────────────────────────────────────┘
+```text
+DetectionEngine creates AlertRecord
+    |
+    +-> append to in-memory state
+    |
+    +-> write to SQLite AlertDB
+    |
+    +-> frontend fetches through /api/alerts
 ```
 
 ---
 
-## Key Design Decisions
+## 10. Current End-to-End View
 
-| Decision | Rationale |
+```text
+React Browser
+    |
+    | HTTP / WebSocket
+    v
+FastAPI Backend
+    |
+    +-- Auth router
+    |
+    +-- Training router
+    |       |
+    |       v
+    |   TrainingPipeline
+    |       |
+    |       +-- CICIDSPreprocessor
+    |       |       fit RobustScaler + PCA on BENIGN train only
+    |       |
+    |       +-- NegativeSelectionDetector
+    |       |       generate V-detectors in PCA space
+    |       |
+    |       +-- SelfBoundaryDetector
+    |       |       learn raw-feature benign boundary
+    |       |
+    |       +-- Score fusion calibration
+    |               calibrate threshold on BENIGN calibration only
+    |
+    +-- Detection router
+    |       |
+    |       v
+    |   DetectionEngine
+    |       |
+    |       +-- transform with saved scaler/PCA
+    |       +-- compute NSA component scores
+    |       +-- compute self-boundary weighted score
+    |       +-- apply saved fused threshold
+    |       +-- optionally compute post-run labelled verification
+    |
+    +-- Capture router
+            |
+            v
+        Scapy packets -> flow features -> DetectionEngine -> WebSocket
+```
+
+---
+
+## 11. Key Design Decisions
+
+| Decision | Reason |
 |---|---|
-| Train/test split **before** fitting the scaler/PCA | Prevents data leakage — test set statistics never influence preprocessing |
-| RobustScaler + PCA whitening | Reduces outlier compression and keeps NSA distances meaningful in lower-dimensional feature space |
-| Dynamic NSA thresholds | Calibrates `r` and `r_s` from benign PCA-space distances instead of hard-coded `[0,1]` assumptions |
-| NSA trains on **BENIGN only** | Mirrors biological negative selection — detectors are educated against self |
-| IsoForest trains on **all** samples | Semi-supervised baseline for comparison |
-| Variable-radius V-detectors | Detectors automatically expand to cover as much non-self space as possible |
-| Self-gap fallback (innate immune) | Catches anomalies in regions not yet covered by any detector |
-| Detector aging (`idle_batches`) | Models finite T-cell lifespan; stale detectors can be refreshed |
-| Feature extraction mimics CICFlowMeter | Live capture produces the exact same 77 features as the training dataset |
-| Authenticated WebSocket + HTTP polling fallback | Ensures real-time updates while requiring valid user access |
-| Windows Firewall via PowerShell | Allows one-click IP blocking directly from the dashboard |
+| CICIDS2017 instead of NSL-KDD | CICIDS2017 is newer, flow-based, and closer to live traffic monitoring |
+| Split before fitting | Prevents preprocessing leakage |
+| BENIGN-only fitting | Keeps the AIS training unsupervised and biologically consistent |
+| RobustScaler | Reduces the impact of large CICIDS2017 outliers |
+| PCA whitening | Makes distance-based NSA scoring more stable |
+| NSA in PCA space | Detector distances are measured in the same transformed feature space |
+| Self-boundary in raw feature space | Preserves interpretable feature-boundary evidence |
+| Score fusion instead of hard OR | Produces a smoother anomaly score and a controllable FPR |
+| Threshold from benign calibration | Keeps threshold selection unsupervised |
+| Labels only after detection | Allows honest evaluation without supervised leakage |
+| Accuracy is secondary | IDS data is imbalanced, so recall, FNR, FPR, precision, and F1 matter more |
+| Live capture has no labelled metrics | Live traffic has no ground-truth labels, so recall/F1 cannot be shown honestly |
+
+---
+
+## 12. Metric Interpretation for Report
+
+Recommended wording:
+
+> The proposed AIS model is trained using only benign traffic. The scaler, PCA transformer, NSA detector repertoire, self-boundary model, score fusion, and anomaly threshold are all fitted or calibrated without attack labels. Attack labels are used only after detection to evaluate the produced anomaly decisions.
+
+> Recall and false negative rate are treated as the main security metrics because missed attacks are more serious than additional alerts. False positive rate is still monitored to control alert fatigue. Accuracy is reported only as a secondary metric because intrusion datasets are often highly imbalanced.
+
+> The Self Intrusion Rate measures how often the AIS mechanism reacts to benign/self traffic. It is interpreted as an autoimmunity check: lower values mean the detector repertoire is less likely to attack self traffic.
+
+> The Silhouette Score is included only as an unsupervised separation indicator. It has limitations because anomaly detection is not pure clustering, and the predicted anomaly group may contain multiple attack behaviours.
+

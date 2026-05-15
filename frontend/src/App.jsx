@@ -1,15 +1,16 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { useEffect, Component } from 'react';
+import { useEffect, Component, Suspense, lazy } from 'react';
 import { AuthProvider } from './context/AuthProvider';
 import { AppProvider }  from './context/AppProvider';
-import Layout      from './components/Layout/Layout';
-import Login       from './pages/Login';
-import Dashboard   from './pages/Dashboard';
-import TrainDetect from './pages/TrainDetect';
-import Alerts      from './pages/Alerts';
-import Settings    from './pages/Settings';
-import Account       from './pages/Account';
-import Accessibility from './pages/Accessibility';
+
+const Layout = lazy(() => import('./components/Layout/Layout'));
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const TrainDetect = lazy(() => import('./pages/TrainDetect'));
+const Alerts = lazy(() => import('./pages/Alerts'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Account = lazy(() => import('./pages/Account'));
+const Accessibility = lazy(() => import('./pages/Accessibility'));
 
 function CatchAll() {
   const navigate = useNavigate();
@@ -35,24 +36,34 @@ class ErrorBoundary extends Component {
   }
 }
 
+function RouteFallback() {
+  return (
+    <div style={{minHeight:'100vh',display:'grid',placeItems:'center',background:'#191724',color:'#e0def4',fontFamily:'system-ui, sans-serif'}}>
+      Loading...
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
           <ErrorBoundary>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/" element={<Layout />}>
-                <Route index           element={<Dashboard />} />
-                <Route path="train"    element={<TrainDetect />} />
-                <Route path="alerts"   element={<Alerts />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="account"       element={<Account />} />
-                <Route path="accessibility" element={<Accessibility />} />
-              </Route>
-              <Route path="*" element={<CatchAll />} />
-            </Routes>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/" element={<Layout />}>
+                  <Route index           element={<Dashboard />} />
+                  <Route path="train"    element={<TrainDetect />} />
+                  <Route path="alerts"   element={<Alerts />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="account"       element={<Account />} />
+                  <Route path="accessibility" element={<Accessibility />} />
+                </Route>
+                <Route path="*" element={<CatchAll />} />
+              </Routes>
+            </Suspense>
           </ErrorBoundary>
         </AppProvider>
       </AuthProvider>
