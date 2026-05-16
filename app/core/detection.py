@@ -81,7 +81,8 @@ class DetectionEngine:
     model         : fitted NSA or IsolationForest detector
     preprocessor  : fitted CICIDSPreprocessor
     active_model  : "nsa" or "isolation_forest"
-    self_boundary : fitted SelfBoundaryDetector (optional)
+    self_boundary : fitted raw-feature SelfBoundaryDetector (optional)
+    pca_self_boundary : fitted PCA-space SelfBoundaryDetector (optional)
     """
 
     def __init__(
@@ -90,11 +91,13 @@ class DetectionEngine:
         preprocessor: CICIDSPreprocessor,
         active_model: str = "nsa",
         self_boundary=None,
+        pca_self_boundary=None,
     ):
         self.model = model
         self.preprocessor = preprocessor
         self.active_model = active_model
         self.self_boundary = self_boundary
+        self.pca_self_boundary = pca_self_boundary
 
     # ------------------------------------------------------------------ #
     #  BATCH DETECTION (CSV upload)                                        #
@@ -121,8 +124,8 @@ class DetectionEngine:
           "summary": {...}
         }
         """
-        # Use transform_with_raw when self-boundary is available
-        if self.self_boundary is not None:
+        # Use transform_with_raw when either self-boundary layer is available.
+        if self.self_boundary is not None or self.pca_self_boundary is not None:
             X_pca, df, df_raw = self.preprocessor.transform_with_raw(
                 source, filename=filename
             )
@@ -147,24 +150,31 @@ class DetectionEngine:
         sb_ratios = None
         sb_flags = None
         sb_evidence = None
+        pca_sb_flags = None
+        pca_sb_scores = None
         nsa_flags = None
         decision_components = None
 
         if (
-            self.self_boundary is not None
+            self._scoring_self_boundary() is not None
             and df_raw is not None
             and self._fusion_ready()
         ):
-            sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
-            sb_weighted_scores = self.self_boundary.weighted_score(df_raw)
+            if self.self_boundary is not None:
+                sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
+            pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw)
             labels, scores, raw_scores = self.model.predict_fused(
                 X_pca,
-                self_boundary_scores=sb_weighted_scores,
+                self_boundary_scores=pca_sb_scores,
             )
             decision_components = self.model.decision_components(
                 X_pca,
-                self_boundary_scores=sb_weighted_scores,
+                self_boundary_scores=pca_sb_scores,
             ) if hasattr(self.model, "decision_components") else None
+            if decision_components is not None:
+                decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
+                if sb_flags is not None:
+                    decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
             min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
             nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
         else:
@@ -191,6 +201,7 @@ class DetectionEngine:
             sb_ratios=sb_ratios,
             sb_flags=sb_flags,
             sb_evidence=sb_evidence,
+            pca_sb_flags=pca_sb_flags,
             decision_components=decision_components,
         )
 
@@ -208,19 +219,27 @@ class DetectionEngine:
         sb_ratios = None
         sb_flags = None
         sb_evidence = None
+        pca_sb_flags = None
+        pca_sb_scores = None
         nsa_flags = None
         decision_components = None
-        if self.self_boundary is not None and self._fusion_ready():
-            sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_single)
-            sb_weighted_scores = self.self_boundary.weighted_score(df_single)
+        df_raw_single = self.preprocessor.clean_feature_frame(df_single)
+        if self._scoring_self_boundary() is not None and self._fusion_ready():
+            if self.self_boundary is not None:
+                sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw_single)
+            pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw_single)
             labels, scores, raw_scores = self.model.predict_fused(
                 X_pca,
-                self_boundary_scores=sb_weighted_scores,
+                self_boundary_scores=pca_sb_scores,
             )
             decision_components = self.model.decision_components(
                 X_pca,
-                self_boundary_scores=sb_weighted_scores,
+                self_boundary_scores=pca_sb_scores,
             ) if hasattr(self.model, "decision_components") else None
+            if decision_components is not None:
+                decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
+                if sb_flags is not None:
+                    decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
             min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
             nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
         else:
@@ -245,6 +264,7 @@ class DetectionEngine:
             sb_ratios=sb_ratios,
             sb_flags=sb_flags,
             sb_evidence=sb_evidence,
+            pca_sb_flags=pca_sb_flags,
             decision_components=decision_components,
         )
 
@@ -264,6 +284,7 @@ class DetectionEngine:
         sb_ratios: Optional[np.ndarray] = None,
         sb_flags: Optional[np.ndarray] = None,
         sb_evidence: Optional[list] = None,
+        pca_sb_flags: Optional[np.ndarray] = None,
         decision_components: Optional[dict] = None,
     ) -> dict:
         """Convert raw predictions to structured result with alert objects."""
@@ -293,44 +314,58 @@ class DetectionEngine:
             nsa_flagged = False
             sb_flagged = False
 
-            # Check which NSA sub-mechanisms fired before final fusion.
-            v_detector_flagged = False
-            self_gap_flagged = False
-            fusion_flagged = False
-            if decision_components is not None:
-                v_detector_flagged = bool(decision_components.get("v_detector_match", [False])[i])
-                self_gap_flagged = bool(decision_components.get("self_gap_match", [False])[i])
-                fusion_flagged = bool(decision_components.get("fusion_score_match", [False])[i])
-                nsa_flagged = bool(v_detector_flagged or self_gap_flagged or decision_components.get("nsa_score_match", [False])[i])
-            elif nsa_flags is not None and i < len(nsa_flags):
-                nsa_flagged = bool(nsa_flags[i] == 1)
-            elif hasattr(self.model, 'predict_with_details'):
-                nsa_labels_only, _, _ = self.model.predict_with_details(
-                    features[i:i+1] if features is not None else np.zeros((1, 1))
-                )
-                nsa_flagged = bool(nsa_labels_only[0] == 1)
-            elif hasattr(self.model, 'predict_with_scores'):
-                nsa_labels_only, _ = self.model.predict_with_scores(
-                    features[i:i+1] if features is not None else np.zeros((1, 1))
-                )
-                nsa_flagged = bool(nsa_labels_only[0] == 1)
+            if self._is_isolation_forest():
+                anomaly_sources.append("isolation_forest")
+                v_detector_flagged = False
+                self_gap_flagged = False
+                fusion_flagged = False
+            else:
+                # Check which NSA sub-mechanisms fired before final fusion.
+                v_detector_flagged = False
+                self_gap_flagged = False
+                fusion_flagged = False
+                if decision_components is not None:
+                    v_detector_flagged = bool(decision_components.get("v_detector_match", [False])[i])
+                    self_gap_flagged = bool(decision_components.get("self_gap_match", [False])[i])
+                    fusion_flagged = bool(decision_components.get("fusion_score_match", [False])[i])
+                    nsa_flagged = bool(v_detector_flagged or self_gap_flagged or decision_components.get("nsa_score_match", [False])[i])
+                elif nsa_flags is not None and i < len(nsa_flags):
+                    nsa_flagged = bool(nsa_flags[i] == 1)
+                elif hasattr(self.model, 'predict_with_details'):
+                    nsa_labels_only, _, _ = self.model.predict_with_details(
+                        features[i:i+1] if features is not None else np.zeros((1, 1))
+                    )
+                    nsa_flagged = bool(nsa_labels_only[0] == 1)
+                elif hasattr(self.model, 'predict_with_scores'):
+                    nsa_labels_only, _ = self.model.predict_with_scores(
+                        features[i:i+1] if features is not None else np.zeros((1, 1))
+                    )
+                    nsa_flagged = bool(nsa_labels_only[0] == 1)
 
-            if v_detector_flagged:
-                anomaly_sources.append("v_detector")
-            if self_gap_flagged:
-                anomaly_sources.append("self_gap")
-            if not decision_components and nsa_flagged:
-                anomaly_sources.append("nsa_pca")
+                if v_detector_flagged:
+                    anomaly_sources.append("v_detector")
+                if self_gap_flagged:
+                    anomaly_sources.append("self_gap")
+                if not decision_components and nsa_flagged:
+                    anomaly_sources.append("nsa_pca")
 
-            if sb_flags is not None and i < len(sb_flags) and sb_flags[i]:
-                sb_flagged = True
-                anomaly_sources.append("self_boundary")
+                if pca_sb_flags is not None and i < len(pca_sb_flags) and pca_sb_flags[i]:
+                    sb_flagged = True
+                    anomaly_sources.append(
+                        "pca_self_boundary"
+                        if self.pca_self_boundary is not None
+                        else "self_boundary"
+                    )
 
-            if fusion_flagged and not v_detector_flagged and not self_gap_flagged:
-                anomaly_sources.append("score_fusion")
+                raw_sb_evidence_flagged = bool(sb_flags is not None and i < len(sb_flags) and sb_flags[i])
+                if raw_sb_evidence_flagged:
+                    anomaly_sources.append("raw_self_boundary_evidence")
 
-            if not anomaly_sources:
-                anomaly_sources.append("score_fusion")
+                if fusion_flagged and not v_detector_flagged and not self_gap_flagged:
+                    anomaly_sources.append("score_fusion")
+
+                if not anomaly_sources:
+                    anomaly_sources.append("score_fusion")
 
             # ── Layer 2: Attack Attribution (NEVER uses labels) ─────────
             # The attack_category column is intentionally NOT passed here.
@@ -348,13 +383,17 @@ class DetectionEngine:
 
             # Build evidence list
             evidence = []
-            if sb_evidence is not None and i < len(sb_evidence):
+            if not self._is_isolation_forest() and sb_evidence is not None and i < len(sb_evidence):
                 evidence.extend(sb_evidence[i])
+            if self._is_isolation_forest():
+                evidence.append("Isolation Forest benign-calibrated anomaly score exceeded")
+            if not self._is_isolation_forest() and pca_sb_flags is not None and i < len(pca_sb_flags) and pca_sb_flags[i]:
+                evidence.append("PCA-space self-boundary exceeded benign calibration")
             if v_detector_flagged:
                 evidence.append("Mature V-detector matched the flow")
             if self_gap_flagged:
                 evidence.append("PCA NSA self-gap exceeded")
-            if not nsa_flagged and not sb_flagged:
+            if not self._is_isolation_forest() and not nsa_flagged and not sb_flagged:
                 evidence.append("Benign-calibrated AIS fusion threshold exceeded")
 
             alert = AlertRecord(
@@ -387,6 +426,31 @@ class DetectionEngine:
         n_zero_day  = sum(1 for a in alerts if a.get('is_zero_day'))
         silhouette = compute_silhouette_metric(features, labels) if features is not None else None
 
+        if self._is_isolation_forest():
+            detection_architecture = "isolation_forest_baseline"
+            layer1_sources = ["isolation_forest"]
+            score_mode = (
+                "isolation_forest_benign_calibrated_score"
+                if getattr(self.model, "score_threshold_", None) is not None
+                else "isolation_forest_sklearn_contamination"
+            )
+            self_boundary_mode = "not_applicable"
+        else:
+            detection_architecture = "two_layer_ais_score_fusion_pca_boundary"
+            layer1_sources = ["v_detector", "self_gap", "score_fusion"] \
+                + (["pca_self_boundary"] if self.pca_self_boundary else []) \
+                + (["raw_self_boundary_evidence"] if self.self_boundary else [])
+            score_mode = (
+                "weighted_fusion_pca_self_boundary"
+                if self._scoring_self_boundary() is not None and self._fusion_ready()
+                else "model_score"
+            )
+            self_boundary_mode = (
+                "hybrid_pca_scoring_raw_evidence"
+                if self.pca_self_boundary is not None
+                else ("legacy_raw_scoring" if self.self_boundary is not None else "none")
+            )
+
         result = {
             "total_checked":      total,
             "row_offset":         int(df.attrs.get("row_offset", 0)) if hasattr(df, "attrs") else 0,
@@ -399,10 +463,12 @@ class DetectionEngine:
             "model_used":         self.active_model,
             "analysed_at":        datetime.now(timezone.utc).isoformat(),
             "metric_explanations": METRIC_EXPLANATIONS,
-            "detection_architecture": "two_layer_ais_score_fusion",
-            "layer1_sources": ["v_detector", "self_gap", "score_fusion"] + (["self_boundary"] if self.self_boundary else []),
-            "score_mode": "weighted_fusion" if self.self_boundary is not None and self._fusion_ready() else "model_score",
+            "detection_architecture": detection_architecture,
+            "layer1_sources": layer1_sources,
+            "score_mode": score_mode,
+            "self_boundary_mode": self_boundary_mode,
         }
+        result["anomaly_sources_summary"] = self._count_sources(alerts)
         if silhouette is not None:
             result["unsupervised_validation"] = {
                 "silhouette": silhouette,
@@ -473,10 +539,12 @@ class DetectionEngine:
                 model_name=f"{self.active_model} threshold analysis",
             )
         if decision_components is not None:
-            metrics["source_decomposition"] = source_decomposition_metrics(
+            source_metrics = source_decomposition_metrics(
                 y_true,
                 decision_components,
             )
+            metrics["source_decomposition"] = source_metrics
+            metrics["source_verification"] = source_metrics
         return metrics
 
     def _raw_anomaly_scores(self, X_scaled: np.ndarray, confidence_scores: np.ndarray) -> np.ndarray:
@@ -487,6 +555,16 @@ class DetectionEngine:
         without raw scoring, the normalized confidence score is still monotonic:
         higher means more anomalous.
         """
+        if hasattr(self.model, "raw_anomaly_scores"):
+            try:
+                return np.asarray(self.model.raw_anomaly_scores(X_scaled), dtype=float)
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to confidence scores for threshold analysis; "
+                    "raw anomaly scoring failed for %s: %s",
+                    type(self.model).__name__,
+                    exc,
+                )
         if hasattr(self.model, "anomaly_scores"):
             try:
                 return np.asarray(self.model.anomaly_scores(X_scaled), dtype=float)
@@ -641,6 +719,45 @@ class DetectionEngine:
             sev = a.get("severity", "low")
             counts[sev] = counts.get(sev, 0) + 1
         return counts
+
+    @staticmethod
+    def _count_sources(alerts: list) -> dict:
+        counts = {}
+        for alert in alerts:
+            for source in alert.get("anomaly_sources", []) or []:
+                counts[source] = counts.get(source, 0) + 1
+        return counts
+
+    def _scoring_self_boundary(self):
+        """Return the SB model used for final score fusion."""
+        return self.pca_self_boundary or self.self_boundary
+
+    def _is_isolation_forest(self) -> bool:
+        return self.active_model == "isolation_forest"
+
+    def _score_scoring_self_boundary(
+        self,
+        X_pca: np.ndarray,
+        df_raw: Optional[pd.DataFrame],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Score the PCA SB when available, otherwise legacy raw SB."""
+        scoring_sb = self._scoring_self_boundary()
+        if scoring_sb is None:
+            n = len(X_pca)
+            return np.zeros(n, dtype=np.float64), np.zeros(n, dtype=bool)
+
+        if scoring_sb is self.pca_self_boundary:
+            pca_df = self.preprocessor.pca_dataframe(X_pca)
+            scores = scoring_sb.weighted_score(pca_df)
+            _, flags, _ = scoring_sb.score(pca_df)
+            return scores, flags
+
+        if df_raw is None:
+            n = len(X_pca)
+            return np.zeros(n, dtype=np.float64), np.zeros(n, dtype=bool)
+        scores = scoring_sb.weighted_score(df_raw)
+        _, flags, _ = scoring_sb.score(df_raw)
+        return scores, flags
 
     def _fusion_ready(self) -> bool:
         return (

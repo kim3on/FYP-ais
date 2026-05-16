@@ -249,7 +249,7 @@ function TrainingTab() {
                   <input type="number" value={nDetectors} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))} 
                     style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
                 </label>
-                <input type="range" min="10" max="10000" step="10" value={nDetectors || 1500}
+                <input type="range" min="10" max="10000" step="10" value={nDetectors || 3000}
                   onChange={e => setND(Number(e.target.value))}
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
               </div>

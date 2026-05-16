@@ -8,5 +8,6 @@ noisy subprocess decoding errors. Providing LOKY_MAX_CPU_COUNT skips that path.
 
 import os
 
-os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))
-
+_cpu_count = os.cpu_count() or 1
+_loky_default = max(1, min(_cpu_count - 1, 8))
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(_loky_default))

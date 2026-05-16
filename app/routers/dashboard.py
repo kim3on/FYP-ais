@@ -11,12 +11,18 @@ GET   /                      — HTML landing page with API overview
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 
-from app.core.pipeline import load_nsa, load_iso, models_ready
+from app.core.pipeline import (
+    load_nsa,
+    load_iso,
+    load_self_boundary,
+    load_pca_self_boundary,
+    models_ready,
+)
 from app.schemas import SettingsUpdate
-from app.state import _state
+from app.state import _state, save_runtime_settings
 from app.routers.auth import get_current_user
 
 router = APIRouter(tags=["dashboard"])
@@ -86,9 +92,20 @@ async def model_summary(user=Depends(get_current_user)):
     """Return metadata for both trained models."""
     nsa = load_nsa()
     iso = load_iso()
+    raw_sb = load_self_boundary()
+    pca_sb = load_pca_self_boundary()
+    nsa_summary = nsa.summary() if nsa else {"status": "not_trained"}
     return {
-        "nsa":              nsa.summary()  if nsa  else {"status": "not_trained"},
+        "nsa":              nsa_summary,
         "isolation_forest": iso.summary()  if iso  else {"status": "not_trained"},
+        "raw_self_boundary_evidence": raw_sb.summary() if raw_sb else {"status": "not_trained"},
+        "pca_self_boundary": pca_sb.summary() if pca_sb else {"status": "not_trained"},
+        "ais_detection": {
+            "detector_count": nsa_summary.get("mature_detectors", 0),
+            "fusion_mode": "NSA + PCA-space Self-Boundary + benign-calibrated fusion threshold",
+            "pca_self_boundary_status": "active" if pca_sb else "legacy_missing",
+            "raw_self_boundary_evidence_status": "active" if raw_sb else "missing",
+        },
         "active":           _state["active_model"],
     }
 
@@ -96,8 +113,21 @@ async def model_summary(user=Depends(get_current_user)):
 @router.patch("/api/settings")
 async def update_settings(settings: SettingsUpdate, user=Depends(get_current_user)):
     """Update runtime settings (active model, alert threshold)."""
-    if settings.active_model in ("nsa", "isolation_forest"):
+    if settings.active_model is not None:
+        if settings.active_model not in ("nsa", "isolation_forest"):
+            raise HTTPException(status_code=400, detail="Invalid active_model")
+
+        if settings.active_model == "nsa":
+            model = load_nsa()
+            if model is None or not getattr(model, "is_fitted_", False):
+                raise HTTPException(status_code=400, detail="NSA model is not trained")
+        else:
+            model = load_iso()
+            if model is None or not getattr(model, "is_fitted_", False):
+                raise HTTPException(status_code=400, detail="Isolation Forest model is not trained")
+
         _state["active_model"] = settings.active_model
+        save_runtime_settings()
     return {"success": True, "active_model": _state["active_model"]}
 
 

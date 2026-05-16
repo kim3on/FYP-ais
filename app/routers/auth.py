@@ -6,6 +6,8 @@ POST /api/auth/login  — authenticate a user and return a session token.
 
 import jwt
 import bcrypt
+import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -18,7 +20,14 @@ from app.core.database import get_db
 from app.models.db_models import UserDB, UserProfileDB
 
 # ── Auth Configuration ───────────────────────────────────────────────────
-SECRET_KEY = "ais-detect-secret-key-change-me-in-production"
+logger = logging.getLogger(__name__)
+_DEV_SECRET = "ais-detect-secret-key-change-me-in-production"
+SECRET_KEY = os.getenv("AIS_SECRET_KEY") or _DEV_SECRET
+if SECRET_KEY == _DEV_SECRET:
+    logger.warning(
+        "AIS_SECRET_KEY is not set; using the development JWT secret. "
+        "Set AIS_SECRET_KEY before exposing this app outside a local FYP demo."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
@@ -128,10 +137,16 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def decode_access_token(token: str) -> dict:
+    """Decode and validate a JWT payload using the shared auth settings."""
+    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+def get_user_from_token(token: str, db: Session) -> UserDB:
     """
-    Dependency that verifies the JWT and returns the authenticated UserDB object.
-    Requires that the user exists and has a valid role.
+    Verify a JWT and return the authenticated user.
+
+    Shared by HTTP dependencies and WebSocket auth so token signature,
+    expiry, subject, and user-existence checks stay consistent.
     """
     credentials_exception = HTTPException(
         status_code=401,
@@ -139,7 +154,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_access_token(token)
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
@@ -154,6 +169,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise HTTPException(status_code=403, detail="User has no role assigned")
         
     return user
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Dependency that verifies the JWT and returns the authenticated UserDB object.
+    Requires that the user exists and has a valid role.
+    """
+    return get_user_from_token(token, db)
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
 

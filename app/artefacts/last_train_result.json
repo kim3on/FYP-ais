@@ -2,58 +2,58 @@
   "nsa_summary": {
     "status": "fitted",
     "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
-    "r": 1.8239938020706177,
+    "r": 1.682492971420288,
     "r_s": 0.01,
-    "max_detectors": 1500,
-    "n_self_samples": 12000,
+    "max_detectors": 10000,
+    "n_self_samples": 60000,
     "self_match_cap": 3000,
     "n_features": 25,
-    "attempts": 1500,
+    "attempts": 10000,
     "candidates_rejected": 0,
     "candidates_rejected_overlap": 0,
     "candidate_strategy": "expanded_pca_tail_envelope_plus_centroid_and_boundary_mutation",
-    "mature_detectors": 1500,
-    "det_radius_min": 1.2654978778601638,
-    "det_radius_max": 6.941850655693238,
-    "det_radius_mean": 3.1794623523869654,
+    "mature_detectors": 10000,
+    "det_radius_min": 1.02265765669824,
+    "det_radius_max": 6.89477006202053,
+    "det_radius_mean": 2.9701215268959342,
     "performance_profile": "laptop",
     "self_ref_cap": 3000,
     "distance_matrix_entry_budget": 4000000,
     "auto_threshold": true,
-    "r_fitted": 1.823994,
+    "r_fitted": 1.682493,
     "r_s_fitted": 0.01,
-    "score_threshold": 0.46287399530410767,
-    "fusion_threshold": 0.026484118368137924,
+    "score_threshold": 0.44914332032203674,
+    "fusion_threshold": 0.011718115934210571,
     "target_fpr": 0.05,
     "calibration": {
       "mode": "unsupervised_benign",
       "target_fpr": 0.05,
-      "observed_fpr": 0.04975,
-      "normal_pass_rate": 0.95025,
-      "threshold": 0.462874,
-      "score_scale": 5.29253,
-      "n_calibration_samples": 4000,
-      "rank_index": 3801,
-      "rank_index_zero_based": 3800,
+      "observed_fpr": 0.04995,
+      "normal_pass_rate": 0.95005,
+      "threshold": 0.449143,
+      "score_scale": 6.487264,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
       "calibration_reliability": "stable",
       "decision_rule": "score > threshold",
       "score_min": 0.0,
-      "score_median": 0.003444,
-      "score_p95": 0.456171,
-      "score_p99": 2.174951,
-      "score_max": 19.186527
+      "score_median": 0.002488,
+      "score_p95": 0.449119,
+      "score_p99": 1.693936,
+      "score_max": 1238.318848
     },
     "fusion_calibration": {
       "mode": "unsupervised_benign_score_fusion",
       "score_mode": "weighted_fusion",
       "target_fpr": 0.05,
-      "observed_fpr": 0.04975,
-      "normal_pass_rate": 0.95025,
-      "threshold": 0.026484,
-      "score_scale": 0.169703,
-      "n_calibration_samples": 4000,
-      "rank_index": 3801,
-      "rank_index_zero_based": 3800,
+      "observed_fpr": 0.04995,
+      "normal_pass_rate": 0.95005,
+      "threshold": 0.011718,
+      "score_scale": 0.090214,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
       "calibration_reliability": "stable",
       "decision_rule": "score > threshold",
       "density_k": 5,
@@ -64,18 +64,18 @@
         "self_boundary": 0.15
       },
       "component_scales": {
-        "distance": 19.186527,
-        "density": 22.177746,
+        "distance": 1238.318848,
+        "density": 1242.947876,
         "detector": 1.0,
-        "self_boundary": 0.664022
+        "self_boundary": 2.536213
       },
-      "score_min": 1e-06,
-      "score_median": 0.000131,
-      "score_p95": 0.026191,
-      "score_p99": 0.095096,
-      "score_max": 0.6
+      "score_min": 0.0,
+      "score_median": 2e-06,
+      "score_p95": 0.011715,
+      "score_p99": 0.052451,
+      "score_max": 0.572283
     },
-    "trained_at": "2026-05-15T13:00:01.002092+00:00",
+    "trained_at": "2026-05-16T11:03:42.848780+00:00",
     "fusion_weights": {
       "detector": 0.4,
       "distance": 0.25,
@@ -83,21 +83,48 @@
       "self_boundary": 0.15
     },
     "fusion_component_scales": {
-      "distance": 19.186527,
-      "density": 22.177746,
+      "distance": 1238.318848,
+      "density": 1242.947876,
       "detector": 1.0,
-      "self_boundary": 0.664022
+      "self_boundary": 2.536213
     },
-    "active_antibodies": 1500
+    "active_antibodies": 10000
   },
   "iso_summary": {
     "status": "fitted",
     "algorithm": "Isolation Forest",
     "contamination": 0.05,
     "n_estimators": 100,
-    "n_training_samples": 12000,
+    "n_training_samples": 60000,
     "n_features": 25,
-    "trained_at": "2026-05-15T13:00:02.216285"
+    "score_calibration": {
+      "mode": "train_distribution_fixed_minmax",
+      "raw_anomaly_min": -0.18968844896330656,
+      "raw_anomaly_max": 0.13420011606457252,
+      "decision_rule": "confidence normalization only; labels use sklearn predict"
+    },
+    "threshold_calibration": {
+      "mode": "unsupervised_benign_isolation_forest",
+      "score_mode": "isolation_forest_raw_anomaly_score",
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04995,
+      "normal_pass_rate": 0.95005,
+      "threshold": 0.003984,
+      "score_scale": 0.225617,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
+      "calibration_reliability": "stable",
+      "decision_rule": "raw_anomaly_score > threshold",
+      "score_min": -0.189688,
+      "score_median": -0.184416,
+      "score_p95": 0.003977,
+      "score_p99": 0.130621,
+      "score_max": 0.311398
+    },
+    "score_threshold": 0.003983508947471404,
+    "trained_at": "2026-05-16T11:03:58.310370",
+    "score_scale": 0.2256172249931453
   },
   "sb_summary": {
     "status": "fitted",
@@ -110,51 +137,113 @@
     "score_mode": "weighted_feature_violation",
     "n_features_modelled": 77,
     "n_constant_features": 12,
-    "n_training_samples": 12000,
-    "weighted_threshold": 0.02990609432154476,
+    "n_training_samples": 60000,
+    "weighted_threshold": 0.02919730091196248,
     "weighted_calibration": {
       "mode": "unsupervised_benign_weighted_self_boundary",
       "target_fpr": 0.05,
-      "observed_fpr": 0.04975,
-      "normal_pass_rate": 0.95025,
-      "threshold": 0.029906,
-      "n_calibration_samples": 4000,
-      "rank_index": 3801,
-      "rank_index_zero_based": 3800,
+      "observed_fpr": 0.04985,
+      "normal_pass_rate": 0.95015,
+      "threshold": 0.029197,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
       "calibration_reliability": "stable",
       "decision_rule": "score > threshold",
       "score_min": 0.0,
       "score_median": 0.0,
-      "score_p95": 0.029885,
-      "score_p99": 0.189032,
-      "score_max": 0.664022
+      "score_p95": 0.029197,
+      "score_p99": 0.174669,
+      "score_max": 0.808547
+    }
+  },
+  "raw_self_boundary_summary": {
+    "status": "fitted",
+    "algorithm": "Quantile Fence Self-Boundary (AIS Innate Immune)",
+    "boundary_mode": "quantile_fence",
+    "lower_quantile": 0.005,
+    "upper_quantile": 0.995,
+    "z_threshold": 2.0,
+    "min_violations_ratio": 0.15,
+    "score_mode": "weighted_feature_violation",
+    "n_features_modelled": 77,
+    "n_constant_features": 12,
+    "n_training_samples": 60000,
+    "weighted_threshold": 0.02919730091196248,
+    "weighted_calibration": {
+      "mode": "unsupervised_benign_weighted_self_boundary",
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04985,
+      "normal_pass_rate": 0.95015,
+      "threshold": 0.029197,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
+      "calibration_reliability": "stable",
+      "decision_rule": "score > threshold",
+      "score_min": 0.0,
+      "score_median": 0.0,
+      "score_p95": 0.029197,
+      "score_p99": 0.174669,
+      "score_max": 0.808547
+    }
+  },
+  "pca_self_boundary_summary": {
+    "status": "fitted",
+    "algorithm": "Quantile Fence Self-Boundary (AIS Innate Immune)",
+    "boundary_mode": "quantile_fence",
+    "lower_quantile": 0.005,
+    "upper_quantile": 0.995,
+    "z_threshold": 2.0,
+    "min_violations_ratio": 0.15,
+    "score_mode": "weighted_feature_violation",
+    "n_features_modelled": 25,
+    "n_constant_features": 0,
+    "n_training_samples": 60000,
+    "weighted_threshold": 0.08574028575856996,
+    "weighted_calibration": {
+      "mode": "unsupervised_benign_weighted_self_boundary",
+      "target_fpr": 0.05,
+      "observed_fpr": 0.04995,
+      "normal_pass_rate": 0.95005,
+      "threshold": 0.08574,
+      "n_calibration_samples": 20000,
+      "rank_index": 19001,
+      "rank_index_zero_based": 19000,
+      "calibration_reliability": "stable",
+      "decision_rule": "score > threshold",
+      "score_min": 0.0,
+      "score_median": 0.0,
+      "score_p95": 0.085731,
+      "score_p99": 0.343305,
+      "score_max": 2.536213
     }
   },
   "nsa_eval": {
     "model_name": "AIS (Fused NSA + Self-Boundary)",
-    "accuracy": 0.8932,
+    "accuracy": 0.8719,
     "precision": null,
     "recall": null,
     "f1": null,
     "tp": 0,
-    "tn": 3573,
-    "fp": 427,
+    "tn": 17437,
+    "fp": 2563,
     "fn": 0,
-    "false_positive_rate": 0.1067,
+    "false_positive_rate": 0.1281,
     "false_negative_rate": null,
     "detection_rate": null,
     "true_positive_rate": null,
     "per_category": {
       "normal": {
-        "correct": 3573,
-        "total": 4000,
-        "rate": 0.8932
+        "correct": 17437,
+        "total": 20000,
+        "rate": 0.8719
       }
     },
-    "n_samples": 4000,
+    "n_samples": 20000,
     "n_attacks": 0,
-    "n_normal": 4000,
-    "evaluated_at": "2026-05-15T13:00:03.653882",
+    "n_normal": 20000,
+    "evaluated_at": "2026-05-16T11:04:25.868425",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -190,7 +279,7 @@
           0.06,
           0.1
         ],
-        "value": 0.1067
+        "value": 0.1281
       }
     },
     "metric_explanations": {
@@ -209,7 +298,7 @@
     },
     "labelled_attack_metrics_applicable": false,
     "training_metric_note": "Benign-only training validation has no attack class; precision, recall, F1, TPR, and FNR are intentionally not reported here.",
-    "self_intrusion_rate": 0.1067,
+    "self_intrusion_rate": 0.1281,
     "self_intrusion_assessment": {
       "grade": "needs_improvement",
       "desired_range": [
@@ -220,46 +309,46 @@
         0.05,
         0.1
       ],
-      "value": 0.1067
+      "value": 0.1281
     },
-    "silhouette_score": 0.6831,
+    "silhouette_score": 0.646,
     "silhouette": {
-      "value": 0.6831,
+      "value": 0.646,
       "applicable": true,
       "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 2000,
       "groups": {
-        "0": 1799,
-        "1": 201
+        "0": 1751,
+        "1": 249
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     }
   },
   "nsa_only_eval": {
     "model_name": "AIS (NSA)",
-    "accuracy": 0.9018,
+    "accuracy": 0.875,
     "precision": null,
     "recall": null,
     "f1": null,
     "tp": 0,
-    "tn": 3607,
-    "fp": 393,
+    "tn": 17499,
+    "fp": 2501,
     "fn": 0,
-    "false_positive_rate": 0.0983,
+    "false_positive_rate": 0.125,
     "false_negative_rate": null,
     "detection_rate": null,
     "true_positive_rate": null,
     "per_category": {
       "normal": {
-        "correct": 3607,
-        "total": 4000,
-        "rate": 0.9018
+        "correct": 17499,
+        "total": 20000,
+        "rate": 0.875
       }
     },
-    "n_samples": 4000,
+    "n_samples": 20000,
     "n_attacks": 0,
-    "n_normal": 4000,
-    "evaluated_at": "2026-05-15T13:00:03.649358",
+    "n_normal": 20000,
+    "evaluated_at": "2026-05-16T11:04:25.851897",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -286,7 +375,7 @@
         "value": null
       },
       "false_positive_rate": {
-        "grade": "prototype_acceptable",
+        "grade": "needs_improvement",
         "desired_range": [
           0.03,
           0.06
@@ -295,7 +384,7 @@
           0.06,
           0.1
         ],
-        "value": 0.0983
+        "value": 0.125
       }
     },
     "metric_explanations": {
@@ -315,29 +404,29 @@
   },
   "iso_eval": {
     "model_name": "Isolation Forest",
-    "accuracy": 0.944,
+    "accuracy": 0.9525,
     "precision": null,
     "recall": null,
     "f1": null,
     "tp": 0,
-    "tn": 3776,
-    "fp": 224,
+    "tn": 19050,
+    "fp": 950,
     "fn": 0,
-    "false_positive_rate": 0.056,
+    "false_positive_rate": 0.0475,
     "false_negative_rate": null,
     "detection_rate": null,
     "true_positive_rate": null,
     "per_category": {
       "normal": {
-        "correct": 3776,
-        "total": 4000,
-        "rate": 0.944
+        "correct": 19050,
+        "total": 20000,
+        "rate": 0.9525
       }
     },
-    "n_samples": 4000,
+    "n_samples": 20000,
     "n_attacks": 0,
-    "n_normal": 4000,
-    "evaluated_at": "2026-05-15T13:00:03.658742",
+    "n_normal": 20000,
+    "evaluated_at": "2026-05-16T11:04:25.883424",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -373,7 +462,7 @@
           0.06,
           0.1
         ],
-        "value": 0.056
+        "value": 0.0475
       }
     },
     "metric_explanations": {
@@ -392,15 +481,15 @@
     },
     "labelled_attack_metrics_applicable": false,
     "training_metric_note": "Benign-only training validation has no attack class; precision, recall, F1, TPR, and FNR are intentionally not reported here.",
-    "silhouette_score": 0.7585,
+    "silhouette_score": 0.7683,
     "silhouette": {
-      "value": 0.7585,
+      "value": 0.7683,
       "applicable": true,
       "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 2000,
       "groups": {
-        "0": 1892,
-        "1": 108
+        "0": 1899,
+        "1": 101
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     }
@@ -412,8 +501,8 @@
     ],
     "metrics": {
       "accuracy": {
-        "AIS (Fused NSA + Self-Boundary)": 0.89325,
-        "Isolation Forest": 0.944
+        "AIS (Fused NSA + Self-Boundary)": 0.87185,
+        "Isolation Forest": 0.9525
       },
       "precision": {
         "AIS (Fused NSA + Self-Boundary)": null,
@@ -428,8 +517,8 @@
         "Isolation Forest": null
       },
       "false_positive_rate": {
-        "AIS (Fused NSA + Self-Boundary)": 0.10675,
-        "Isolation Forest": 0.056
+        "AIS (Fused NSA + Self-Boundary)": 0.12815,
+        "Isolation Forest": 0.0475
       },
       "false_negative_rate": {
         "AIS (Fused NSA + Self-Boundary)": null,
@@ -468,21 +557,21 @@
     "dataset": "CIC-IDS-2017"
   },
   "validation_mode": "strict_unsupervised_benign_fusion_calibrated",
-  "benign_row_limit": 20000,
+  "benign_row_limit": 100000,
   "benign_rows_available": 458831,
-  "benign_rows_used": 20000,
+  "benign_rows_used": 100000,
   "training_warnings": [],
   "calibration_summary": {
     "mode": "unsupervised_benign_score_fusion",
     "score_mode": "weighted_fusion",
     "target_fpr": 0.05,
-    "observed_fpr": 0.04975,
-    "normal_pass_rate": 0.95025,
-    "threshold": 0.026484,
-    "score_scale": 0.169703,
-    "n_calibration_samples": 4000,
-    "rank_index": 3801,
-    "rank_index_zero_based": 3800,
+    "observed_fpr": 0.04995,
+    "normal_pass_rate": 0.95005,
+    "threshold": 0.011718,
+    "score_scale": 0.090214,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
     "calibration_reliability": "stable",
     "decision_rule": "score > threshold",
     "density_k": 5,
@@ -493,51 +582,106 @@
       "self_boundary": 0.15
     },
     "component_scales": {
-      "distance": 19.186527,
-      "density": 22.177746,
+      "distance": 1238.318848,
+      "density": 1242.947876,
       "detector": 1.0,
-      "self_boundary": 0.664022
+      "self_boundary": 2.536213
     },
-    "score_min": 1e-06,
-    "score_median": 0.000131,
-    "score_p95": 0.026191,
-    "score_p99": 0.095096,
-    "score_max": 0.6
+    "score_min": 0.0,
+    "score_median": 2e-06,
+    "score_p95": 0.011715,
+    "score_p99": 0.052451,
+    "score_max": 0.572283
   },
+  "calibration_reliability": "stable",
   "nsa_calibration_summary": {
     "mode": "unsupervised_benign",
     "target_fpr": 0.05,
-    "observed_fpr": 0.04975,
-    "normal_pass_rate": 0.95025,
-    "threshold": 0.462874,
-    "score_scale": 5.29253,
-    "n_calibration_samples": 4000,
-    "rank_index": 3801,
-    "rank_index_zero_based": 3800,
+    "observed_fpr": 0.04995,
+    "normal_pass_rate": 0.95005,
+    "threshold": 0.449143,
+    "score_scale": 6.487264,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
     "calibration_reliability": "stable",
     "decision_rule": "score > threshold",
     "score_min": 0.0,
-    "score_median": 0.003444,
-    "score_p95": 0.456171,
-    "score_p99": 2.174951,
-    "score_max": 19.186527
+    "score_median": 0.002488,
+    "score_p95": 0.449119,
+    "score_p99": 1.693936,
+    "score_max": 1238.318848
   },
+  "iso_calibration_summary": {
+    "mode": "unsupervised_benign_isolation_forest",
+    "score_mode": "isolation_forest_raw_anomaly_score",
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04995,
+    "normal_pass_rate": 0.95005,
+    "threshold": 0.003984,
+    "score_scale": 0.225617,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
+    "calibration_reliability": "stable",
+    "decision_rule": "raw_anomaly_score > threshold",
+    "score_min": -0.189688,
+    "score_median": -0.184416,
+    "score_p95": 0.003977,
+    "score_p99": 0.130621,
+    "score_max": 0.311398
+  },
+  "self_boundary_mode": "hybrid_pca_scoring_raw_evidence",
   "self_boundary_calibration_summary": {
     "mode": "unsupervised_benign_weighted_self_boundary",
     "target_fpr": 0.05,
-    "observed_fpr": 0.04975,
-    "normal_pass_rate": 0.95025,
-    "threshold": 0.029906,
-    "n_calibration_samples": 4000,
-    "rank_index": 3801,
-    "rank_index_zero_based": 3800,
+    "observed_fpr": 0.04995,
+    "normal_pass_rate": 0.95005,
+    "threshold": 0.08574,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
     "calibration_reliability": "stable",
     "decision_rule": "score > threshold",
     "score_min": 0.0,
     "score_median": 0.0,
-    "score_p95": 0.029885,
-    "score_p99": 0.189032,
-    "score_max": 0.664022
+    "score_p95": 0.085731,
+    "score_p99": 0.343305,
+    "score_max": 2.536213
+  },
+  "pca_self_boundary_calibration_summary": {
+    "mode": "unsupervised_benign_weighted_self_boundary",
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04995,
+    "normal_pass_rate": 0.95005,
+    "threshold": 0.08574,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
+    "calibration_reliability": "stable",
+    "decision_rule": "score > threshold",
+    "score_min": 0.0,
+    "score_median": 0.0,
+    "score_p95": 0.085731,
+    "score_p99": 0.343305,
+    "score_max": 2.536213
+  },
+  "raw_self_boundary_calibration_summary": {
+    "mode": "unsupervised_benign_weighted_self_boundary",
+    "target_fpr": 0.05,
+    "observed_fpr": 0.04985,
+    "normal_pass_rate": 0.95015,
+    "threshold": 0.029197,
+    "n_calibration_samples": 20000,
+    "rank_index": 19001,
+    "rank_index_zero_based": 19000,
+    "calibration_reliability": "stable",
+    "decision_rule": "score > threshold",
+    "score_min": 0.0,
+    "score_median": 0.0,
+    "score_p95": 0.029197,
+    "score_p99": 0.174669,
+    "score_max": 0.808547
   },
   "post_run_labelled_verification": {
     "available": false,
@@ -545,9 +689,15 @@
     "verification_mode": "post_run_labelled_verification",
     "verification_only": true
   },
+  "iso_post_run_labelled_verification": {
+    "available": false,
+    "reason": "No labelled attack rows were available for Isolation Forest post-run verification.",
+    "verification_mode": "post_run_labelled_verification",
+    "verification_only": true
+  },
   "ais_metrics": {
-    "self_intrusion_rate": 0.1067,
-    "self_intrusion_rate_pct": 10.67,
+    "self_intrusion_rate": 0.1281,
+    "self_intrusion_rate_pct": 12.81,
     "self_intrusion_assessment": {
       "grade": "needs_improvement",
       "desired_range": [
@@ -558,80 +708,104 @@
         0.05,
         0.1
       ],
-      "value": 0.1067
+      "value": 0.1281
     },
     "explanation": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
   },
   "unsupervised_validation": {
     "silhouette": {
-      "value": 0.6831,
+      "value": 0.646,
       "applicable": true,
       "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 2000,
       "groups": {
-        "0": 1799,
-        "1": 201
+        "0": 1751,
+        "1": 249
       },
       "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
     },
-    "silhouette_score": 0.6831,
+    "silhouette_score": 0.646,
     "source_decomposition": {
       "available": true,
       "verification_only": true,
-      "n_samples": 4000,
+      "n_samples": 20000,
       "n_attacks": 0,
-      "n_benign": 4000,
+      "n_benign": 20000,
       "sources": {
         "v_detector": {
-          "count": 361,
+          "count": 2405,
           "tp": 0,
-          "fp": 361,
+          "fp": 2405,
           "recall": null,
-          "false_positive_rate": 0.0902
+          "false_positive_rate": 0.1202
         },
         "self_gap": {
-          "count": 34,
+          "count": 194,
           "tp": 0,
-          "fp": 34,
+          "fp": 194,
           "recall": null,
-          "false_positive_rate": 0.0085
+          "false_positive_rate": 0.0097
         },
         "nsa_score": {
-          "count": 198,
+          "count": 990,
           "tp": 0,
-          "fp": 198,
+          "fp": 990,
           "recall": null,
           "false_positive_rate": 0.0495
         },
         "score_fusion": {
-          "count": 175,
+          "count": 954,
           "tp": 0,
-          "fp": 175,
+          "fp": 954,
           "recall": null,
-          "false_positive_rate": 0.0437
+          "false_positive_rate": 0.0477
+        },
+        "pca_self_boundary": {
+          "count": 960,
+          "tp": 0,
+          "fp": 960,
+          "recall": null,
+          "false_positive_rate": 0.048
+        },
+        "raw_self_boundary_evidence": {
+          "count": 960,
+          "tp": 0,
+          "fp": 960,
+          "recall": null,
+          "false_positive_rate": 0.048
         },
         "fusion_only": {
-          "count": 44,
+          "count": 0,
           "tp": 0,
-          "fp": 44,
+          "fp": 0,
           "recall": null,
-          "false_positive_rate": 0.011
+          "false_positive_rate": 0.0
         }
       },
       "overlaps": {
-        "D": 361,
-        "G": 34,
-        "F": 175,
-        "D_and_G": 12,
-        "D_and_F": 109,
-        "G_and_F": 34,
-        "D_and_G_and_F": 12,
-        "F_only": 44
+        "D": 2405,
+        "G": 194,
+        "F": 954,
+        "P": 960,
+        "R": 960,
+        "D_and_G": 119,
+        "D_and_F": 796,
+        "G_and_F": 194,
+        "P_and_F": 627,
+        "P_and_D": 665,
+        "P_and_G": 189,
+        "R_and_F": 444,
+        "D_and_G_and_F": 119,
+        "F_only": 0,
+        "P_only": 137,
+        "R_only": 159
       },
       "legend": {
         "D": "mature V-detector match",
         "G": "self-gap fallback",
-        "F": "fused-score threshold"
+        "F": "fused-score threshold",
+        "P": "PCA-space self-boundary threshold",
+        "R": "raw-feature self-boundary evidence"
       }
     },
     "silhouette_assessment": {
@@ -644,9 +818,92 @@
         0.2,
         0.35
       ],
-      "value": 0.6831
+      "value": 0.646
     },
     "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
+  },
+  "source_decomposition": {
+    "available": true,
+    "verification_only": true,
+    "n_samples": 20000,
+    "n_attacks": 0,
+    "n_benign": 20000,
+    "sources": {
+      "v_detector": {
+        "count": 2405,
+        "tp": 0,
+        "fp": 2405,
+        "recall": null,
+        "false_positive_rate": 0.1202
+      },
+      "self_gap": {
+        "count": 194,
+        "tp": 0,
+        "fp": 194,
+        "recall": null,
+        "false_positive_rate": 0.0097
+      },
+      "nsa_score": {
+        "count": 990,
+        "tp": 0,
+        "fp": 990,
+        "recall": null,
+        "false_positive_rate": 0.0495
+      },
+      "score_fusion": {
+        "count": 954,
+        "tp": 0,
+        "fp": 954,
+        "recall": null,
+        "false_positive_rate": 0.0477
+      },
+      "pca_self_boundary": {
+        "count": 960,
+        "tp": 0,
+        "fp": 960,
+        "recall": null,
+        "false_positive_rate": 0.048
+      },
+      "raw_self_boundary_evidence": {
+        "count": 960,
+        "tp": 0,
+        "fp": 960,
+        "recall": null,
+        "false_positive_rate": 0.048
+      },
+      "fusion_only": {
+        "count": 0,
+        "tp": 0,
+        "fp": 0,
+        "recall": null,
+        "false_positive_rate": 0.0
+      }
+    },
+    "overlaps": {
+      "D": 2405,
+      "G": 194,
+      "F": 954,
+      "P": 960,
+      "R": 960,
+      "D_and_G": 119,
+      "D_and_F": 796,
+      "G_and_F": 194,
+      "P_and_F": 627,
+      "P_and_D": 665,
+      "P_and_G": 189,
+      "R_and_F": 444,
+      "D_and_G_and_F": 119,
+      "F_only": 0,
+      "P_only": 137,
+      "R_only": 159
+    },
+    "legend": {
+      "D": "mature V-detector match",
+      "G": "self-gap fallback",
+      "F": "fused-score threshold",
+      "P": "PCA-space self-boundary threshold",
+      "R": "raw-feature self-boundary evidence"
+    }
   },
   "metric_explanations": {
     "tp": "True Positives: attack flows correctly flagged as anomalies.",
@@ -662,8 +919,8 @@
     "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
     "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
   },
-  "detection_architecture": "two_layer_ais_score_fusion",
-  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit PCA/scaler, train detectors, train self-boundary, calibrate fusion weights/scales, or tune thresholds.",
-  "duration_seconds": 6.35,
-  "trained_at": "2026-05-15T20:59:57.506819"
+  "detection_architecture": "two_layer_ais_score_fusion_pca_boundary",
+  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit PCA/scaler, train detectors, train self-boundary, calibrate fusion weights/scales, or tune thresholds. PCA-space self-boundary is used for final scoring; raw-feature self-boundary is retained only for alert evidence.",
+  "duration_seconds": 46.41,
+  "trained_at": "2026-05-16T19:03:39.704000"
 }

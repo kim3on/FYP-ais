@@ -307,7 +307,8 @@ def source_decomposition_metrics(
     """
     Report labelled source-level recall/FPR for AIS decision regions.
 
-    D = mature V-detector match, G = self-gap, F = fused-score threshold.
+    D = mature V-detector match, G = self-gap, F = fused-score threshold,
+    P = PCA-space self-boundary, R = raw-feature self-boundary evidence.
     Labels are expected to be used only after prediction for verification.
     """
     y_true = np.asarray(y_true).astype(int)
@@ -320,11 +321,17 @@ def source_decomposition_metrics(
         "self_gap": np.asarray(components.get("self_gap_match", np.zeros(n)), dtype=bool),
         "nsa_score": np.asarray(components.get("nsa_score_match", np.zeros(n)), dtype=bool),
         "score_fusion": np.asarray(components.get("fusion_score_match", np.zeros(n)), dtype=bool),
+        "pca_self_boundary": np.asarray(components.get("pca_self_boundary_match", np.zeros(n)), dtype=bool),
+        "raw_self_boundary_evidence": np.asarray(
+            components.get("raw_self_boundary_evidence_match", np.zeros(n)),
+            dtype=bool,
+        ),
     }
     source_defs["fusion_only"] = (
         source_defs["score_fusion"]
         & ~source_defs["v_detector"]
         & ~source_defs["self_gap"]
+        & ~source_defs["pca_self_boundary"]
     )
 
     attack_mask = y_true == 1
@@ -352,15 +359,25 @@ def source_decomposition_metrics(
     d = source_defs["v_detector"]
     g = source_defs["self_gap"]
     f = source_defs["score_fusion"]
+    p = source_defs["pca_self_boundary"]
+    r = source_defs["raw_self_boundary_evidence"]
     overlaps = {
         "D": int(d.sum()),
         "G": int(g.sum()),
         "F": int(f.sum()),
+        "P": int(p.sum()),
+        "R": int(r.sum()),
         "D_and_G": int((d & g).sum()),
         "D_and_F": int((d & f).sum()),
         "G_and_F": int((g & f).sum()),
+        "P_and_F": int((p & f).sum()),
+        "P_and_D": int((p & d).sum()),
+        "P_and_G": int((p & g).sum()),
+        "R_and_F": int((r & f).sum()),
         "D_and_G_and_F": int((d & g & f).sum()),
-        "F_only": int((f & ~d & ~g).sum()),
+        "F_only": int((f & ~d & ~g & ~p).sum()),
+        "P_only": int((p & ~d & ~g & ~f).sum()),
+        "R_only": int((r & ~d & ~g & ~f & ~p).sum()),
     }
 
     return {
@@ -375,6 +392,8 @@ def source_decomposition_metrics(
             "D": "mature V-detector match",
             "G": "self-gap fallback",
             "F": "fused-score threshold",
+            "P": "PCA-space self-boundary threshold",
+            "R": "raw-feature self-boundary evidence",
         },
     }
 

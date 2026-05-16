@@ -190,7 +190,7 @@ class SelfBoundaryDetector:
         violation_ratios : ndarray of float, shape (n_samples,)
             Fraction of features violated per sample (0.0 to 1.0).
         anomaly_flags : ndarray of bool, shape (n_samples,)
-            True if violation_ratio >= min_violations_ratio.
+            True if violation_ratio > min_violations_ratio.
         evidence : list of list of str
             Per-sample human-readable evidence strings.
         """
@@ -211,7 +211,7 @@ class SelfBoundaryDetector:
         if self.weighted_threshold_ is not None:
             anomaly_flags = weighted_scores > self.weighted_threshold_
         else:
-            anomaly_flags = violation_ratios >= self.min_violations_ratio
+            anomaly_flags = violation_ratios > self.min_violations_ratio
 
         # Build evidence strings (top violations per sample)
         evidence = []
@@ -323,7 +323,7 @@ class SelfBoundaryDetector:
         if self.weighted_threshold_ is not None:
             anomaly_flags = weighted_scores > self.weighted_threshold_
         else:
-            anomaly_flags = violation_ratios >= self.min_violations_ratio
+            anomaly_flags = violation_ratios > self.min_violations_ratio
 
         return violation_ratios.astype(np.float64), anomaly_flags
 

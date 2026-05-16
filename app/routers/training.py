@@ -38,8 +38,8 @@ async def train(
     file: UploadFile = File(...),
     r:              float = 0.3,
     r_s:            float | None = None,
-    max_detectors:  int   = 1500,
-    max_attempts:   int   = 40_000,
+    max_detectors:  int   = 3000,
+    max_attempts:   int   = 100_000,
     contamination:  float = 0.05,
     test_size:      float = 0.2,
     n_pca_components: int | None = 25,
@@ -53,8 +53,8 @@ async def train(
     Config params (query string or form fields):
       r              — Self-gap detection threshold  (default 0.3)
       r_s            — V-Detector self-tolerance     (default: auto from r)
-      max_detectors  — max mature V-detectors        (default 1 500)
-      max_attempts   — max candidate gen attempts    (default 40 000)
+      max_detectors  — max mature V-detectors        (default 3 000)
+      max_attempts   — max candidate gen attempts    (default 100 000)
       contamination  — IsoForest contamination       (default 0.05)
       test_size      — train/test split fraction     (default 0.2)
     """

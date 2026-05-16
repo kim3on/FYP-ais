@@ -13,6 +13,10 @@ Covers:
 Run with:  python test_backend.py
 """
 import sys, os, io, tempfile
+
+_cpu_count = os.cpu_count() or 1
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, min(_cpu_count - 1, 8))))
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, recall_score, precision_score
@@ -355,7 +359,35 @@ def test_iso_on_cicids():
     assert set(labels).issubset({0, 1})
     assert all(0.0 <= s <= 1.0 for s in scores)
 
+def test_iso_score_stable_across_batch_sizes():
+    csv = _make_cicids_csv(100, 30)
+    prep = CICIDSPreprocessor()
+    X_normal, _, _ = prep.fit_transform_unsafe_single_dataset(csv)
+    X_all, _ = prep.transform(_make_cicids_csv(20, 10))
+    iso = IsolationForestDetector(contamination=0.1, random_state=2)
+    iso.fit(X_normal)
+    _, score_single = iso.predict_with_scores(X_all[:1])
+    _, score_batch = iso.predict_with_scores(X_all[:10])
+    assert float(score_single[0]) == float(score_batch[0]), \
+        "Isolation Forest confidence should use fixed training calibration, not batch min/max"
+
+def test_iso_benign_calibrated_threshold():
+    csv = _make_cicids_csv(120, 30)
+    prep = CICIDSPreprocessor()
+    X_normal, _, _ = prep.fit_transform_unsafe_single_dataset(csv)
+    iso = IsolationForestDetector(contamination=0.1, random_state=2)
+    iso.fit(X_normal[:80])
+    calibration = iso.calibrate_threshold(X_normal[80:], target_fpr=0.05)
+    labels, scores = iso.predict_with_scores(X_normal[80:])
+    assert calibration["mode"] == "unsupervised_benign_isolation_forest"
+    assert calibration["decision_rule"] == "raw_anomaly_score > threshold"
+    assert iso.score_threshold_ is not None
+    assert labels.mean() <= 0.10, "Benign-calibrated IF should keep holdout FPR controlled"
+    assert all(0.0 <= s <= 1.0 for s in scores)
+
 test("IsoForest — fits and predicts on CIC-IDS-2017 features", test_iso_on_cicids)
+test("IsoForest — score normalization stable across batch sizes", test_iso_score_stable_across_batch_sizes)
+test("IsoForest — benign-calibrated threshold available", test_iso_benign_calibrated_threshold)
 
 
 # ════════════════════════════════════════════════════════════
@@ -407,6 +439,19 @@ def test_self_boundary_quantile_fences_and_strict_threshold():
     assert not bool(flags_inside[0]), "Strict score > threshold should not flag zero-score rows"
     assert bool(flags_outside[0]), "Out-of-fence sample should be flagged"
 
+def test_self_boundary_ratio_fallback_uses_strict_threshold():
+    df = pd.DataFrame({
+        "a": np.linspace(10.0, 20.0, 200),
+        "b": np.linspace(100.0, 200.0, 200),
+    })
+    sb = SelfBoundaryDetector(min_violations_ratio=0.5)
+    sb.fit(df, ["a", "b"])
+    sb.weighted_threshold_ = None
+    _, flags_equal, _ = sb.score(pd.DataFrame({"a": [100.0], "b": [150.0]}))
+    _, flags_above, _ = sb.score(pd.DataFrame({"a": [100.0], "b": [500.0]}))
+    assert not bool(flags_equal[0]), "One of two violations equals 0.5 and must not flag"
+    assert bool(flags_above[0]), "Two of two violations exceeds 0.5 and must flag"
+
 def test_self_boundary_legacy_gaussian_compat():
     sb = SelfBoundaryDetector()
     sb.feature_names_ = ["a"]
@@ -423,6 +468,7 @@ test("Evaluator — per-category stats with CIC-IDS-2017 labels", test_evaluator
 test("Evaluator — severity score thresholds correct",            test_severity_mapping)
 test("Calibration — conformal threshold rank is deterministic",  test_conformal_threshold_known_rank)
 test("Self-Boundary — quantile fences and strict threshold",      test_self_boundary_quantile_fences_and_strict_threshold)
+test("Self-Boundary — fallback ratio uses strict threshold",      test_self_boundary_ratio_fallback_uses_strict_threshold)
 test("Self-Boundary — legacy Gaussian artifacts remain usable",   test_self_boundary_legacy_gaussian_compat)
 
 
@@ -452,7 +498,17 @@ def test_pipeline_cicids():
     assert result['calibration_summary']['score_mode'] == 'weighted_fusion'
     assert 'calibration_reliability' in result['calibration_summary']
     assert 'calibration_reliability' in result['nsa_calibration_summary']
+    assert 'calibration_reliability' in result['iso_calibration_summary']
+    assert result['iso_calibration_summary']['mode'] == 'unsupervised_benign_isolation_forest'
+    assert result['iso_summary']['threshold_calibration']['decision_rule'] == 'raw_anomaly_score > threshold'
     assert 'calibration_reliability' in result['self_boundary_calibration_summary']
+    assert result['self_boundary_mode'] == 'hybrid_pca_scoring_raw_evidence'
+    assert result['raw_self_boundary_summary']['status'] == 'fitted'
+    assert result['pca_self_boundary_summary']['status'] == 'fitted'
+    assert result['pca_self_boundary_summary']['score_mode'] == 'weighted_feature_violation'
+    assert result['pca_self_boundary_summary']['n_features_modelled'] == result['nsa_summary']['n_features']
+    assert 'calibration_reliability' in result['pca_self_boundary_calibration_summary']
+    assert 'calibration_reliability' in result['raw_self_boundary_calibration_summary']
     assert 'fusion_calibration' in result['nsa_summary']
     assert result['sb_summary']['score_mode'] == 'weighted_feature_violation'
     assert result['sb_summary']['boundary_mode'] == 'quantile_fence'
@@ -469,6 +525,10 @@ def test_pipeline_cicids():
     assert labelled['available'] is True
     assert labelled['threshold_analysis']['verification_only'] is True
     assert labelled['source_decomposition']['available'] is True
+    iso_labelled = result['iso_post_run_labelled_verification']
+    assert iso_labelled['available'] is True
+    assert iso_labelled['verification_only'] is True
+    assert iso_labelled['baseline_only'] is True
 
     n_feat = result['validation_stats']['n_features']
     n_ab   = result['nsa_summary']['mature_detectors']
@@ -499,7 +559,7 @@ test("Pipeline — result JSON persisted to disk",                  test_pipelin
 print("\n── 6. Detection Engine ─────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 from app.core.detection import DetectionEngine
-from app.core.pipeline import load_nsa, load_preprocessor, load_self_boundary
+from app.core.pipeline import load_nsa, load_preprocessor, load_self_boundary, load_pca_self_boundary
 
 def test_detection_result_structure():
     """Detection should return correct keys and alert structure."""
@@ -511,9 +571,10 @@ def test_detection_result_structure():
     nsa  = load_nsa()
     prep = load_preprocessor()
     sb   = load_self_boundary()
-    assert nsa is not None and prep is not None and sb is not None
+    pca_sb = load_pca_self_boundary()
+    assert nsa is not None and prep is not None and sb is not None and pca_sb is not None
 
-    engine = DetectionEngine(nsa, prep, active_model='nsa', self_boundary=sb)
+    engine = DetectionEngine(nsa, prep, active_model='nsa', self_boundary=sb, pca_self_boundary=pca_sb)
     result = engine.detect_from_csv(_make_cicids_csv(n_benign=20, n_attack=10))
 
     assert result['total_checked'] == 30
@@ -528,10 +589,20 @@ def test_detection_result_structure():
     assert result['threshold_analysis']['verification_only'] is True
     assert 'recommended' in result['threshold_analysis']
     assert result['source_decomposition']['available'] is True
-    assert 'self_boundary' in result['layer1_sources']
+    assert result['source_verification']['available'] is True
+    assert 'pca_self_boundary' in result['layer1_sources']
+    assert 'raw_self_boundary_evidence' in result['layer1_sources']
     assert 'v_detector' in result['layer1_sources']
     assert 'self_gap' in result['layer1_sources']
-    assert result['score_mode'] == 'weighted_fusion'
+    assert result['score_mode'] == 'weighted_fusion_pca_self_boundary'
+    assert result['self_boundary_mode'] == 'hybrid_pca_scoring_raw_evidence'
+    assert 'anomaly_sources_summary' in result
+
+    live_sample = pd.read_csv(io.BytesIO(_make_cicids_csv(n_benign=1, n_attack=0))).iloc[0].to_dict()
+    live_sample['Flow Bytes/s'] = float('inf')
+    live_sample['Flow Packets/s'] = np.nan
+    live_result = engine.detect_sample(live_sample)
+    assert live_result['total_checked'] == 1
 
     offset_result = engine.detect_from_csv(
         _make_cicids_csv(n_benign=40, n_attack=20),
@@ -554,7 +625,11 @@ def test_detection_alert_fields():
                 'protocol', 'attack_type', 'severity', 'confidence',
                 'confidence_pct', 'is_false_positive', 'anomaly_sources'}
     valid_sev = {'critical', 'high', 'medium', 'low'}
-    valid_sources = {'v_detector', 'self_gap', 'self_boundary', 'score_fusion', 'nsa_pca'}
+    valid_sources = {
+        'v_detector', 'self_gap', 'pca_self_boundary', 'self_boundary',
+        'raw_self_boundary_evidence', 'score_fusion', 'nsa_pca',
+        'isolation_forest',
+    }
 
     for alert in result['alerts']:
         missing = required - set(alert.keys())
@@ -574,6 +649,13 @@ def test_detection_with_iso_model():
     result = engine.detect_from_csv(_make_cicids_csv(n_benign=20, n_attack=10))
     assert result['model_used'] == 'isolation_forest'
     assert result['total_checked'] == 30
+    assert result['detection_architecture'] == 'isolation_forest_baseline'
+    assert result['layer1_sources'] == ['isolation_forest']
+    assert result['score_mode'] == 'isolation_forest_benign_calibrated_score'
+    assert result['self_boundary_mode'] == 'not_applicable'
+    assert 'v_detector' not in result['layer1_sources']
+    for alert in result['alerts']:
+        assert alert['anomaly_sources'] == ['isolation_forest']
 
 test("Detection — result structure has all required keys",          test_detection_result_structure)
 test("Detection — every alert has required fields & valid severity", test_detection_alert_fields)

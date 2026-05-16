@@ -39,6 +39,7 @@ NSA_PATH        = os.path.join(ARTEFACT_DIR, "nsa_model.pkl")
 ISO_PATH        = os.path.join(ARTEFACT_DIR, "iso_model.pkl")
 PREP_PATH       = os.path.join(ARTEFACT_DIR, "preprocessor.pkl")
 SB_PATH         = os.path.join(ARTEFACT_DIR, "self_boundary.pkl")
+PCA_SB_PATH     = os.path.join(ARTEFACT_DIR, "pca_self_boundary.pkl")
 RESULTS_PATH    = os.path.join(ARTEFACT_DIR, "last_train_result.json")
 
 MIN_BENIGN_ROWS_HARD = 100
@@ -77,8 +78,8 @@ class TrainingPipeline:
         self,
         r: float = 0.3,
         r_s: float | None = None,
-        max_detectors: int = 1500,
-        max_attempts: int = 40_000,
+        max_detectors: int = 3000,
+        max_attempts: int = 100_000,
         contamination: float = 0.05,
         test_size: float = 0.2,
         random_state: int = 42,
@@ -118,12 +119,20 @@ class TrainingPipeline:
         def log(msg: str):
             ts = datetime.now().strftime("%H:%M:%S")
             full = f"[{ts}] {msg}"
-            # Use sys.stdout with replace errors to avoid cp1252 crashes on Windows
-            import sys
-            sys.stdout.buffer.write((full + "\n").encode("utf-8", errors="replace"))
-            sys.stdout.flush()
             if log_callback:
                 log_callback(full)
+            # Console output is best-effort only. Windows detached/reload
+            # processes can expose invalid stdout handles; logging must never
+            # abort training.
+            try:
+                import sys
+                if hasattr(sys.stdout, "buffer"):
+                    sys.stdout.buffer.write((full + "\n").encode("utf-8", errors="replace"))
+                else:
+                    sys.stdout.write(full + "\n")
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
 
         # ── 1. INITIAL LOAD ──────────────────────────────────────────
         log("[SYSTEM] Initiating training sequence...")
@@ -208,16 +217,31 @@ class TrainingPipeline:
         for warning in training_warnings:
             log(f"[WARN] {warning}")
 
-        # ── 4. TRAIN SELF-BOUNDARY DETECTOR ─────────────────────────────
-        log("[SB] Training Self-Boundary detector on BENIGN raw features...")
-        sb = SelfBoundaryDetector(
+        # ── 4. TRAIN SELF-BOUNDARY DETECTORS ───────────────────────────
+        log("[SB] Training raw Self-Boundary detector on BENIGN raw features for evidence...")
+        raw_sb = SelfBoundaryDetector(
             z_threshold=2.0,
             min_violations_ratio=0.15,
         )
-        sb.fit(df_train_raw, preprocessor.feature_columns_)
+        raw_sb.fit(df_train_raw, preprocessor.feature_columns_)
         log(
-            f"[OK] Self-Boundary fitted: {sb.n_features_} features modelled "
-            f"(z-threshold={sb.z_threshold}, min-violations={sb.min_violations_ratio:.0%})."
+            f"[OK] Raw Self-Boundary fitted: {raw_sb.n_features_} features modelled "
+            f"(z-threshold={raw_sb.z_threshold}, min-violations={raw_sb.min_violations_ratio:.0%})."
+        )
+
+        log("[SB] Training PCA-space Self-Boundary detector for fused AIS scoring...")
+        X_train_pca_df = preprocessor.pca_dataframe(X_train)
+        X_cal_pca_df = preprocessor.pca_dataframe(X_cal)
+        X_test_pca_df = preprocessor.pca_dataframe(X_test)
+        pca_feature_columns = preprocessor.pca_feature_names(X_train.shape[1])
+        pca_sb = SelfBoundaryDetector(
+            z_threshold=2.0,
+            min_violations_ratio=0.15,
+        )
+        pca_sb.fit(X_train_pca_df, pca_feature_columns)
+        log(
+            f"[OK] PCA Self-Boundary fitted: {pca_sb.n_features_} PCA components modelled "
+            "(used for final score fusion)."
         )
 
         # ── 5. TRAIN NSA ───────────────────────────────────────────────
@@ -249,28 +273,45 @@ class TrainingPipeline:
             f"observed {nsa_calibration['observed_fpr'] * 100:.2f}%)."
         )
 
-        log("[INFO] Calibrating weighted self-boundary on BENIGN calibration rows...")
-        sb_cal_scores = sb.weighted_score(df_cal_raw[preprocessor.feature_columns_])
-        sb_calibration = sb.calibrate_weighted_threshold(
+        log("[INFO] Calibrating raw self-boundary on BENIGN calibration rows for evidence...")
+        raw_sb_calibration = raw_sb.calibrate_weighted_threshold(
             df_cal_raw[preprocessor.feature_columns_],
             target_fpr=self.target_fpr,
         )
-        if sb_calibration.get("calibration_reliability") == "experimental":
+        if raw_sb_calibration.get("calibration_reliability") == "experimental":
             warning = (
-                "Self-boundary calibration reliability is experimental because the "
+                "Raw self-boundary calibration reliability is experimental because the "
                 "benign calibration sample is small."
             )
             training_warnings.append(warning)
             log(f"[WARN] {warning}")
         log(
-            f"[OK] Self-boundary weighted threshold: {sb_calibration['threshold']:.6f} "
-            f"(observed FPR {sb_calibration['observed_fpr'] * 100:.2f}%)."
+            f"[OK] Raw self-boundary weighted threshold: {raw_sb_calibration['threshold']:.6f} "
+            f"(observed FPR {raw_sb_calibration['observed_fpr'] * 100:.2f}%)."
+        )
+
+        log("[INFO] Calibrating PCA self-boundary on BENIGN calibration rows...")
+        pca_sb_cal_scores = pca_sb.weighted_score(X_cal_pca_df)
+        pca_sb_calibration = pca_sb.calibrate_weighted_threshold(
+            X_cal_pca_df,
+            target_fpr=self.target_fpr,
+        )
+        if pca_sb_calibration.get("calibration_reliability") == "experimental":
+            warning = (
+                "PCA self-boundary calibration reliability is experimental because the "
+                "benign calibration sample is small."
+            )
+            training_warnings.append(warning)
+            log(f"[WARN] {warning}")
+        log(
+            f"[OK] PCA self-boundary weighted threshold: {pca_sb_calibration['threshold']:.6f} "
+            f"(observed FPR {pca_sb_calibration['observed_fpr'] * 100:.2f}%)."
         )
 
         log("[INFO] Calibrating fused AIS score on BENIGN calibration rows only...")
         fusion_calibration = nsa.calibrate_fusion(
             X_cal,
-            self_boundary_scores=sb_cal_scores,
+            self_boundary_scores=pca_sb_cal_scores,
             target_fpr=self.target_fpr,
         )
         if fusion_calibration.get("calibration_reliability") == "experimental":
@@ -293,6 +334,22 @@ class TrainingPipeline:
             random_state=self.random_state,
         )
         iso.fit(X_train)
+        iso_calibration = iso.calibrate_threshold(
+            X_cal,
+            target_fpr=self.target_fpr,
+        )
+        if iso_calibration.get("calibration_reliability") == "experimental":
+            warning = (
+                "Isolation Forest calibration reliability is experimental because "
+                "the benign calibration sample is small."
+            )
+            training_warnings.append(warning)
+            log(f"[WARN] {warning}")
+        log(
+            f"[OK] Isolation Forest calibrated threshold: {iso_calibration['threshold']:.6f} "
+            f"(target FPR {iso_calibration['target_fpr'] * 100:.2f}%, "
+            f"observed {iso_calibration['observed_fpr'] * 100:.2f}%)."
+        )
         log("[OK] Isolation Forest training complete.")
 
         # ── 7. EVALUATE ───────────────────────────────────────────────
@@ -301,15 +358,19 @@ class TrainingPipeline:
         iso_labels, _ = iso.predict_with_scores(X_test)
 
         # Evaluate fused AIS score on benign test rows.
-        sb_test_scores = sb.weighted_score(df_test_raw[preprocessor.feature_columns_])
+        pca_sb_test_scores = pca_sb.weighted_score(X_test_pca_df)
         fused_labels, _, _ = nsa.predict_fused(
             X_test,
-            self_boundary_scores=sb_test_scores,
+            self_boundary_scores=pca_sb_test_scores,
         )
         test_components = nsa.decision_components(
             X_test,
-            self_boundary_scores=sb_test_scores,
+            self_boundary_scores=pca_sb_test_scores,
         )
+        _, pca_sb_test_flags, _ = pca_sb.score(X_test_pca_df)
+        _, raw_sb_test_flags, _ = raw_sb.score(df_test_raw[preprocessor.feature_columns_])
+        test_components["pca_self_boundary_match"] = np.asarray(pca_sb_test_flags, dtype=bool)
+        test_components["raw_self_boundary_evidence_match"] = np.asarray(raw_sb_test_flags, dtype=bool)
 
         y_test = np.zeros(len(X_test), dtype=int)
         nsa_result = evaluate_model(y_test, nsa_labels, "AIS (NSA)", df_test_meta)
@@ -341,6 +402,12 @@ class TrainingPipeline:
             "verification_mode": "post_run_labelled_verification",
             "verification_only": True,
         }
+        iso_labelled_verification = {
+            "available": False,
+            "reason": "No labelled attack rows were available for Isolation Forest post-run verification.",
+            "verification_mode": "post_run_labelled_verification",
+            "verification_only": True,
+        }
         if len(df_attack_raw) > 0:
             log("[INFO] Running report-only labelled verification after unsupervised training...")
             attack_eval = df_attack_raw
@@ -357,16 +424,21 @@ class TrainingPipeline:
                 ignore_index=True,
             )
             X_label_eval, df_label_meta = preprocessor.transform_df(df_label_eval_raw)
-            sb_label_features = preprocessor._clean(df_label_eval_raw.copy(), inference=True)
-            sb_label_scores = sb.weighted_score(sb_label_features[preprocessor.feature_columns_])
+            X_label_pca_df = preprocessor.pca_dataframe(X_label_eval)
+            pca_sb_label_scores = pca_sb.weighted_score(X_label_pca_df)
             label_pred, _, label_raw_scores = nsa.predict_fused(
                 X_label_eval,
-                self_boundary_scores=sb_label_scores,
+                self_boundary_scores=pca_sb_label_scores,
             )
             label_components = nsa.decision_components(
                 X_label_eval,
-                self_boundary_scores=sb_label_scores,
+                self_boundary_scores=pca_sb_label_scores,
             )
+            _, pca_sb_label_flags, _ = pca_sb.score(X_label_pca_df)
+            raw_label_features = preprocessor.clean_feature_frame(df_label_eval_raw)
+            _, raw_sb_label_flags, _ = raw_sb.score(raw_label_features[preprocessor.feature_columns_])
+            label_components["pca_self_boundary_match"] = np.asarray(pca_sb_label_flags, dtype=bool)
+            label_components["raw_self_boundary_evidence_match"] = np.asarray(raw_sb_label_flags, dtype=bool)
             y_label_true = (
                 df_label_meta["attack_category"]
                 .fillna("Unknown")
@@ -398,12 +470,39 @@ class TrainingPipeline:
                 y_label_true,
                 label_components,
             )
+            labelled_metrics["source_verification"] = labelled_metrics["source_decomposition"]
             labelled_metrics["verification_note"] = (
                 "Attack labels are used only after unsupervised prediction to report "
                 "recall, FNR, FPR, precision, and threshold tradeoffs. They do not "
                 "modify saved model artifacts or thresholds."
             )
             labelled_verification = labelled_metrics
+            iso_label_pred, _ = iso.predict_with_scores(X_label_eval)
+            iso_label_raw_scores = iso.raw_anomaly_scores(X_label_eval)
+            iso_labelled_metrics = evaluate_model(
+                y_label_true,
+                iso_label_pred.astype(int),
+                "Isolation Forest baseline labelled verification",
+                df_label_meta,
+            ).to_dict()
+            iso_labelled_metrics["available"] = True
+            iso_labelled_metrics["verification_mode"] = "post_run_labelled_verification"
+            iso_labelled_metrics["verification_only"] = True
+            iso_labelled_metrics["baseline_only"] = True
+            iso_labelled_metrics["sampled_attack_rows"] = bool(attack_eval_sampled)
+            iso_labelled_metrics["n_eval_attacks_available"] = int(len(df_attack_raw))
+            iso_labelled_metrics["n_eval_attacks_used"] = int(len(attack_eval))
+            iso_labelled_metrics["n_eval_benign_used"] = int(len(df_test_raw))
+            iso_labelled_metrics["threshold_analysis"] = threshold_analysis(
+                y_label_true,
+                iso_label_raw_scores,
+                model_name="Isolation Forest baseline threshold analysis",
+            )
+            iso_labelled_metrics["verification_note"] = (
+                "Isolation Forest is an unsupervised BENIGN-only baseline. Labels "
+                "are used only after prediction to verify baseline performance."
+            )
+            iso_labelled_verification = iso_labelled_metrics
             log(
                 "[OK] Labelled verification: "
                 f"Recall={labelled_metrics.get('recall')} | "
@@ -417,9 +516,10 @@ class TrainingPipeline:
         log("[INFO] Saving trained models to disk...")
         nsa.save(NSA_PATH)
         iso.save(ISO_PATH)
-        sb.save(SB_PATH)
+        raw_sb.save(SB_PATH)
+        pca_sb.save(PCA_SB_PATH)
         preprocessor.save(PREP_PATH)
-        log("[OK] Models saved successfully (NSA, ISO, Self-Boundary, Preprocessor).")
+        log("[OK] Models saved successfully (NSA, ISO, raw SB, PCA SB, Preprocessor).")
 
         # ── 9. COMPILE RESULT ──────────────────────────────────────────
         duration = (datetime.now() - t0).total_seconds()
@@ -454,7 +554,9 @@ class TrainingPipeline:
         result = {
             "nsa_summary":      nsa.summary(),
             "iso_summary":      iso.summary(),
-            "sb_summary":       sb.summary(),
+            "sb_summary":       raw_sb.summary(),
+            "raw_self_boundary_summary": raw_sb.summary(),
+            "pca_self_boundary_summary": pca_sb.summary(),
             "nsa_eval":         nsa_eval,
             "nsa_only_eval":    nsa_only_eval,
             "iso_eval":         iso_eval,
@@ -466,9 +568,15 @@ class TrainingPipeline:
             "benign_rows_used": int(len(df_benign)),
             "training_warnings": training_warnings,
             "calibration_summary": fusion_calibration,
+            "calibration_reliability": fusion_calibration.get("calibration_reliability"),
             "nsa_calibration_summary": nsa_calibration,
-            "self_boundary_calibration_summary": sb_calibration,
+            "iso_calibration_summary": iso_calibration,
+            "self_boundary_mode": "hybrid_pca_scoring_raw_evidence",
+            "self_boundary_calibration_summary": pca_sb_calibration,
+            "pca_self_boundary_calibration_summary": pca_sb_calibration,
+            "raw_self_boundary_calibration_summary": raw_sb_calibration,
             "post_run_labelled_verification": labelled_verification,
+            "iso_post_run_labelled_verification": iso_labelled_verification,
             "ais_metrics": {
                 "self_intrusion_rate": round(self_intrusion_rate, 4),
                 "self_intrusion_rate_pct": round(self_intrusion_rate * 100, 2),
@@ -485,12 +593,15 @@ class TrainingPipeline:
                 ),
                 "explanation": METRIC_EXPLANATIONS["silhouette_score"],
             },
+            "source_decomposition": benign_source_decomposition,
             "metric_explanations": METRIC_EXPLANATIONS,
-            "detection_architecture": "two_layer_ais_score_fusion",
+            "detection_architecture": "two_layer_ais_score_fusion_pca_boundary",
             "unsupervised_note": (
                 "Labels are used only to select BENIGN self rows and for reporting. "
                 "No attack labels are used to fit PCA/scaler, train detectors, "
-                "train self-boundary, calibrate fusion weights/scales, or tune thresholds."
+                "train self-boundary, calibrate fusion weights/scales, or tune thresholds. "
+                "PCA-space self-boundary is used for final scoring; raw-feature "
+                "self-boundary is retained only for alert evidence."
             ),
             "duration_seconds": round(duration, 2),
             "trained_at":       t0.isoformat(),
@@ -528,9 +639,16 @@ def load_preprocessor() -> CICIDSPreprocessor | None:
 
 
 def load_self_boundary() -> SelfBoundaryDetector | None:
-    """Load the trained Self-Boundary detector if it exists."""
+    """Load the trained raw-feature Self-Boundary detector if it exists."""
     if os.path.exists(SB_PATH):
         return SelfBoundaryDetector.load(SB_PATH)
+    return None
+
+
+def load_pca_self_boundary() -> SelfBoundaryDetector | None:
+    """Load the trained PCA-space Self-Boundary detector if it exists."""
+    if os.path.exists(PCA_SB_PATH):
+        return SelfBoundaryDetector.load(PCA_SB_PATH)
     return None
 
 

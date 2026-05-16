@@ -15,12 +15,21 @@
 
 // ── Auth ──────────────────────────────────────────────────────
 export async function login(username, password) {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res.ok) throw new Error('Invalid credentials');
+  let res;
+  try {
+    res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch {
+    throw new Error('Backend is not reachable');
+  }
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Invalid credentials');
+    const text = await res.text();
+    throw new Error(text || `Login failed (HTTP ${res.status})`);
+  }
   return res.json();
 }
 

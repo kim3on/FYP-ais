@@ -330,6 +330,36 @@ class CICIDSPreprocessor:
             X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
         return X_scaled
 
+    def clean_feature_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Return numeric raw feature columns aligned to the fitted training schema.
+
+        Used by live detection and raw self-boundary evidence. This applies the
+        same inf/NaN handling, metadata dropping, clipping, and missing-column
+        fill policy as normal inference preprocessing, but does not scale or PCA
+        transform the values.
+        """
+        self._check_fitted()
+        return self._clean(df.copy(), inference=True)
+
+    def pca_feature_names(self, n_components: int | None = None) -> list[str]:
+        """Return stable names for PCA-space feature columns."""
+        if n_components is None:
+            if self.pca_ is not None:
+                n_components = int(getattr(self.pca_, "n_components_", 0) or 0)
+            elif self.feature_columns_ is not None:
+                n_components = len(self.feature_columns_)
+            else:
+                n_components = 0
+        return [f"PC_{i + 1:03d}" for i in range(int(n_components))]
+
+    def pca_dataframe(self, X_pca: np.ndarray) -> pd.DataFrame:
+        """Wrap PCA-space features in a DataFrame for PCA Self-Boundary."""
+        X = np.asarray(X_pca, dtype=np.float64)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        return pd.DataFrame(X, columns=self.pca_feature_names(X.shape[1]))
+
     # ------------------------------------------------------------------ #
     #  INTERNAL                                                            #
     # ------------------------------------------------------------------ #

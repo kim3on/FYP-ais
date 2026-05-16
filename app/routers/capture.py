@@ -248,14 +248,14 @@ async def websocket_live(ws: WebSocket, token: Optional[str] = Query(None)):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    from app.routers.auth import SECRET_KEY, ALGORITHM
-    import jwt
+    from app.routers.auth import get_user_from_token
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if not payload.get("sub"):
-            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-    except jwt.PyJWTError:
+        db = SessionLocal()
+        try:
+            get_user_from_token(token, db)
+        finally:
+            db.close()
+    except HTTPException:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

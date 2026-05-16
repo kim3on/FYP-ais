@@ -17,7 +17,7 @@ export function AppProvider({ children }) {
 
   // Train/Detect persistence
   const [trainFile, setTrainFile]       = useState(null);
-  const [nDetectors, setND]             = useState(1500);
+  const [nDetectors, setND]             = useState(3000);
   const [benignRowLimit, setBenignRowLimit] = useState(20000);
   const [rRadius, setR]                 = useState(0.30);
   const [rsRadius, setRS]               = useState(0.03);

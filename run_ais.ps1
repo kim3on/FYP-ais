@@ -39,14 +39,14 @@ if (-not (Test-Path "frontend\node_modules")) {
 }
 
 # ── 3. Launch Backend ────────────────────────────────────────────────
-Write-Host "[3/4] Launching FastAPI Backend (Port 8000)..." -ForegroundColor Green
+Write-Host "[3/4] Launching FastAPI Backend (Port 8001)..." -ForegroundColor Green
 $backendCommand = @"
 `$env:PYTHONUTF8='1';
 `$env:PYTHONIOENCODING='utf-8';
 `$env:LOKY_MAX_CPU_COUNT='$env:LOKY_MAX_CPU_COUNT';
 Set-Location '$PSScriptRoot';
 .\.venv\Scripts\activate;
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 "@
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendCommand -WindowStyle Normal
 
@@ -56,7 +56,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$PS
 
 Write-Host "`n====================================================" -ForegroundColor Cyan
 Write-Host "  AIS-Detect is running! " -ForegroundColor White
-Write-Host "  - Backend API : http://localhost:8000" -ForegroundColor Gray
+Write-Host "  - Backend API : http://localhost:8001" -ForegroundColor Gray
 Write-Host "  - Frontend UI : http://localhost:5173" -ForegroundColor Gray
 Write-Host "====================================================`n" -ForegroundColor Cyan
 

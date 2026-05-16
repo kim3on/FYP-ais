@@ -87,10 +87,16 @@ function formatStatus(value) {
   return String(value).replace(/_/g, ' ');
 }
 
+function isModelUnavailable(modelInfo, modelId) {
+  const status = modelInfo?.[modelId]?.status;
+  return Boolean(status && status !== 'fitted');
+}
+
 export default function Settings() {
   const { activeModel, setActiveModel, refreshStatus } = useApp();
   const [systemStatus, setSystemStatus] = useState(null);
   const [modelInfo, setModelInfo]   = useState(null);
+  const [saving, setSaving]         = useState(false);
   const [threshold, setThreshold]   = useState(0.5);
   const [zdThreshold, setZdThreshold] = useState(0.65);
   const [saved, setSaved]           = useState(false);
@@ -112,16 +118,25 @@ export default function Settings() {
 
   async function handleSave() {
     setError(''); setSaved(false);
+    setSaving(true);
     try {
-      await updateSettings({
+      const result = await updateSettings({
         active_model: activeModel,
         threshold,
         zero_day_threshold: zdThreshold,
       });
+      if (result.active_model) setActiveModel(result.active_model);
       setSaved(true);
-      refreshStatus();
+      await refreshStatus();
+      getSystemStatus().then(setSystemStatus).catch(err => {
+        console.error("Failed to refresh system status:", err);
+      });
       setTimeout(() => setSaved(false), 3000);
-    } catch(err) { setError(err.message); }
+    } catch(err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleClearFlows() {
@@ -146,24 +161,28 @@ export default function Settings() {
           title="Detection Settings"
           action={
             <button className="btn btn-primary settings-save" onClick={handleSave}>
-              Save Settings
+              {saving ? 'Saving...' : 'Save Settings'}
             </button>
           }
         >
           <div className="settings-grid two">
             <FieldBlock label="Active Model">
               <div className="settings-model-list">
-                {MODELS.map(model => (
+                {MODELS.map(model => {
+                  const unavailable = isModelUnavailable(modelInfo, model.id);
+                  return (
                   <button
                     key={model.id}
                     type="button"
                     className={`settings-model ${activeModel === model.id ? 'active' : ''}`}
                     onClick={() => setActiveModel(model.id)}
+                    disabled={unavailable || saving}
                   >
                     <span>{model.name}</span>
-                    <small>{model.desc}</small>
+                    <small>{unavailable ? 'Train this model before selecting it.' : model.desc}</small>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </FieldBlock>
 
