@@ -12,6 +12,7 @@ from app.core.pipeline import (
     load_nsa, load_iso, load_preprocessor, load_self_boundary,
     load_pca_self_boundary,
 )
+from app.core.datasets import DATASET_CICIDS2017, normalize_dataset_type
 from app.core.detection import DetectionEngine
 from pathlib import Path
 import json
@@ -36,6 +37,7 @@ def save_runtime_settings() -> None:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "active_model": _state.get("active_model", "nsa"),
+        "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
     }
     with SETTINGS_PATH.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -45,6 +47,12 @@ _runtime_settings = _load_runtime_settings()
 _initial_active_model = _runtime_settings.get("active_model", "nsa")
 if _initial_active_model not in {"nsa", "isolation_forest"}:
     _initial_active_model = "nsa"
+try:
+    _initial_active_dataset_type = normalize_dataset_type(
+        _runtime_settings.get("active_dataset_type", DATASET_CICIDS2017)
+    )
+except ValueError:
+    _initial_active_dataset_type = DATASET_CICIDS2017
 
 
 # ── In-memory state ──────────────────────────────────────────────────────
@@ -54,11 +62,12 @@ _state: dict = {
     "alerts":         [],
     "last_result":    None,
     "active_model":   _initial_active_model,  # "nsa" or "isolation_forest"
+    "active_dataset_type": _initial_active_dataset_type,
     "packet_count":   0,
     "anomaly_count":  0,
     # Live capture
     "capture_active": False,
-    "sniffer":        None,         # PacketSniffer instance
+    "sniffer":        None,         # live capture sniffer instance
     "ws_clients":     [],           # active WebSocket connections
     # Live chart ring buffer (60 data points)
     "chart_normal":   [0] * 60,
@@ -72,12 +81,17 @@ _state: dict = {
 }
 
 
-def _build_engine() -> DetectionEngine:
+def _build_engine(dataset_type: str | None = None) -> DetectionEngine:
     """Build a DetectionEngine from the persisted artefacts."""
-    prep = load_preprocessor()
-    model = load_iso() if _state["active_model"] == "isolation_forest" else load_nsa()
-    raw_sb = load_self_boundary()
-    pca_sb = load_pca_self_boundary()
+    selected_dataset = normalize_dataset_type(dataset_type or _state["active_dataset_type"])
+    prep = load_preprocessor(selected_dataset)
+    model = (
+        load_iso(selected_dataset)
+        if _state["active_model"] == "isolation_forest"
+        else load_nsa(selected_dataset)
+    )
+    raw_sb = load_self_boundary(selected_dataset)
+    pca_sb = load_pca_self_boundary(selected_dataset)
     return DetectionEngine(
         model, prep,
         active_model=_state["active_model"],

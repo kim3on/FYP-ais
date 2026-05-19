@@ -7,6 +7,7 @@ export function AppProvider({ children }) {
   const [systemStatus, setSystemStatus] = useState(null);
   const [dashStats, setDashStats]     = useState(null);
   const [activeModel, setActiveModel] = useState('nsa');
+  const [datasetType, setDatasetType] = useState('cicids2017');
   const [captureRunning, setCaptureRunning] = useState(false);
   const [theme, setTheme] = useState('light');
 
@@ -63,6 +64,7 @@ export function AppProvider({ children }) {
       const status = await getSystemStatus();
       setSystemStatus(status);
       if (status.active_model) setActiveModel(status.active_model);
+      if (status.active_dataset_type) setDatasetType(status.active_dataset_type);
     } catch (err) {
       console.error("Failed to refresh status:", err);
     }
@@ -104,6 +106,7 @@ export function AppProvider({ children }) {
       systemStatus, refreshStatus,
       dashStats, refreshDashStats,
       activeModel, setActiveModel,
+      datasetType, setDatasetType,
       captureRunning, setCaptureRunning,
       theme, setTheme,
       trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit, rRadius, setR, rsRadius, setRS,

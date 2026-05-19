@@ -13,11 +13,21 @@ This module is called by the FastAPI /train endpoint.
 """
 
 import os
+import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 
+from app.core.datasets import (
+    DATASET_CICIDS2017,
+    DATASET_NSL_KDD,
+    artifact_paths,
+    dataset_display_name,
+    legacy_cicids_paths,
+    normalize_dataset_type,
+)
+from app.core.nsl_kdd_preprocessor import NSLKDDPreprocessor
 from app.core.preprocessor import CICIDSPreprocessor
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
@@ -33,14 +43,13 @@ from app.models.isolation_forest import IsolationForestDetector
 from app.models.self_boundary import SelfBoundaryDetector
 
 # ── Paths ────────────────────────────────────────────────────────────────
-BASE_DIR        = os.path.dirname(os.path.dirname(__file__))
-ARTEFACT_DIR    = os.path.join(BASE_DIR, "artefacts")
-NSA_PATH        = os.path.join(ARTEFACT_DIR, "nsa_model.pkl")
-ISO_PATH        = os.path.join(ARTEFACT_DIR, "iso_model.pkl")
-PREP_PATH       = os.path.join(ARTEFACT_DIR, "preprocessor.pkl")
-SB_PATH         = os.path.join(ARTEFACT_DIR, "self_boundary.pkl")
-PCA_SB_PATH     = os.path.join(ARTEFACT_DIR, "pca_self_boundary.pkl")
-RESULTS_PATH    = os.path.join(ARTEFACT_DIR, "last_train_result.json")
+_DEFAULT_PATHS  = artifact_paths(DATASET_CICIDS2017)
+NSA_PATH        = _DEFAULT_PATHS.nsa
+ISO_PATH        = _DEFAULT_PATHS.iso
+PREP_PATH       = _DEFAULT_PATHS.preprocessor
+SB_PATH         = _DEFAULT_PATHS.self_boundary
+PCA_SB_PATH     = _DEFAULT_PATHS.pca_self_boundary
+RESULTS_PATH    = _DEFAULT_PATHS.results
 
 MIN_BENIGN_ROWS_HARD = 100
 MIN_BENIGN_ROWS_RECOMMENDED = 1_000
@@ -86,7 +95,10 @@ class TrainingPipeline:
         n_pca_components: float | int | None = 0.95,
         target_fpr: float = 0.05,
         benign_row_limit: int | None = 20_000,
+        dataset_type: str = DATASET_CICIDS2017,
     ):
+        self.dataset_type = normalize_dataset_type(dataset_type)
+        self.paths = artifact_paths(self.dataset_type)
         self.r = float(np.clip(r, 0.01, 5.0))
         self.r_s = float(np.clip(r_s, 0.01, 5.0)) if r_s is not None else None
         self.max_detectors = int(np.clip(max_detectors, MIN_TRAINING_DETECTORS, MAX_TRAINING_DETECTORS))
@@ -102,7 +114,12 @@ class TrainingPipeline:
             else None
         )
 
-        os.makedirs(ARTEFACT_DIR, exist_ok=True)
+        os.makedirs(self.paths.root, exist_ok=True)
+
+    def _make_preprocessor(self):
+        if self.dataset_type == DATASET_NSL_KDD:
+            return NSLKDDPreprocessor(n_pca_components=self.n_pca_components)
+        return CICIDSPreprocessor(n_pca_components=self.n_pca_components)
 
     # ------------------------------------------------------------------ #
     #  MAIN ENTRY POINT                                                    #
@@ -136,7 +153,8 @@ class TrainingPipeline:
 
         # ── 1. INITIAL LOAD ──────────────────────────────────────────
         log("[SYSTEM] Initiating training sequence...")
-        preprocessor = CICIDSPreprocessor(n_pca_components=self.n_pca_components)
+        log(f"[INFO] Dataset profile: {dataset_display_name(self.dataset_type)}")
+        preprocessor = self._make_preprocessor()
 
         log(f"[INFO] Loading and parsing dataset{' (' + filename + ')' if filename else ''}...")
         df_raw = preprocessor._load(dataset_source, filename=filename)
@@ -219,11 +237,14 @@ class TrainingPipeline:
 
         # ── 4. TRAIN SELF-BOUNDARY DETECTORS ───────────────────────────
         log("[SB] Training raw Self-Boundary detector on BENIGN raw features for evidence...")
+        df_train_features = preprocessor.clean_feature_frame(df_train_raw)
+        df_cal_features = preprocessor.clean_feature_frame(df_cal_raw)
+        df_test_features = preprocessor.clean_feature_frame(df_test_raw)
         raw_sb = SelfBoundaryDetector(
             z_threshold=2.0,
             min_violations_ratio=0.15,
         )
-        raw_sb.fit(df_train_raw, preprocessor.feature_columns_)
+        raw_sb.fit(df_train_features, preprocessor.feature_columns_)
         log(
             f"[OK] Raw Self-Boundary fitted: {raw_sb.n_features_} features modelled "
             f"(z-threshold={raw_sb.z_threshold}, min-violations={raw_sb.min_violations_ratio:.0%})."
@@ -275,7 +296,7 @@ class TrainingPipeline:
 
         log("[INFO] Calibrating raw self-boundary on BENIGN calibration rows for evidence...")
         raw_sb_calibration = raw_sb.calibrate_weighted_threshold(
-            df_cal_raw[preprocessor.feature_columns_],
+            df_cal_features[preprocessor.feature_columns_],
             target_fpr=self.target_fpr,
         )
         if raw_sb_calibration.get("calibration_reliability") == "experimental":
@@ -368,7 +389,7 @@ class TrainingPipeline:
             self_boundary_scores=pca_sb_test_scores,
         )
         _, pca_sb_test_flags, _ = pca_sb.score(X_test_pca_df)
-        _, raw_sb_test_flags, _ = raw_sb.score(df_test_raw[preprocessor.feature_columns_])
+        _, raw_sb_test_flags, _ = raw_sb.score(df_test_features[preprocessor.feature_columns_])
         test_components["pca_self_boundary_match"] = np.asarray(pca_sb_test_flags, dtype=bool)
         test_components["raw_self_boundary_evidence_match"] = np.asarray(raw_sb_test_flags, dtype=bool)
 
@@ -514,11 +535,11 @@ class TrainingPipeline:
 
         # ── 8. SAVE ARTEFACTS ──────────────────────────────────────────
         log("[INFO] Saving trained models to disk...")
-        nsa.save(NSA_PATH)
-        iso.save(ISO_PATH)
-        raw_sb.save(SB_PATH)
-        pca_sb.save(PCA_SB_PATH)
-        preprocessor.save(PREP_PATH)
+        nsa.save(self.paths.nsa)
+        iso.save(self.paths.iso)
+        raw_sb.save(self.paths.self_boundary)
+        pca_sb.save(self.paths.pca_self_boundary)
+        preprocessor.save(self.paths.preprocessor)
         log("[OK] Models saved successfully (NSA, ISO, raw SB, PCA SB, Preprocessor).")
 
         # ── 9. COMPILE RESULT ──────────────────────────────────────────
@@ -552,6 +573,9 @@ class TrainingPipeline:
         iso_eval["silhouette"] = iso_silhouette
 
         result = {
+            "dataset_type":     self.dataset_type,
+            "dataset_display":  dataset_display_name(self.dataset_type),
+            "batch_only":       self.dataset_type == DATASET_NSL_KDD,
             "nsa_summary":      nsa.summary(),
             "iso_summary":      iso.summary(),
             "sb_summary":       raw_sb.summary(),
@@ -606,10 +630,14 @@ class TrainingPipeline:
             "duration_seconds": round(duration, 2),
             "trained_at":       t0.isoformat(),
         }
+        result["nsa_summary"]["dataset_type"] = self.dataset_type
+        result["nsa_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
+        result["iso_summary"]["dataset_type"] = self.dataset_type
+        result["iso_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
 
         # Persist result to disk for the dashboard to read on reload
         import json
-        with open(RESULTS_PATH, "w") as f:
+        with open(self.paths.results, "w") as f:
             json.dump(result, f, indent=2)
 
         return result
@@ -617,41 +645,69 @@ class TrainingPipeline:
 
 # ── Convenience functions ────────────────────────────────────────────────
 
-def load_nsa() -> NegativeSelectionDetector | None:
+def _paths_with_legacy_fallback(dataset_type: str | None):
+    dataset = normalize_dataset_type(dataset_type)
+    paths = artifact_paths(dataset)
+    fallbacks = [paths]
+    if dataset == DATASET_CICIDS2017:
+        fallbacks.append(legacy_cicids_paths())
+    return fallbacks
+
+
+def _first_existing_path(dataset_type: str | None, attr: str) -> str | None:
+    for paths in _paths_with_legacy_fallback(dataset_type):
+        path = getattr(paths, attr)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def load_nsa(dataset_type: str | None = DATASET_CICIDS2017) -> NegativeSelectionDetector | None:
     """Load the trained NSA model if it exists."""
-    if os.path.exists(NSA_PATH):
-        return NegativeSelectionDetector.load(NSA_PATH)
+    path = _first_existing_path(dataset_type, "nsa")
+    if path:
+        return NegativeSelectionDetector.load(path)
     return None
 
 
-def load_iso() -> IsolationForestDetector | None:
+def load_iso(dataset_type: str | None = DATASET_CICIDS2017) -> IsolationForestDetector | None:
     """Load the trained Isolation Forest model if it exists."""
-    if os.path.exists(ISO_PATH):
-        return IsolationForestDetector.load(ISO_PATH)
+    path = _first_existing_path(dataset_type, "iso")
+    if path:
+        return IsolationForestDetector.load(path)
     return None
 
 
-def load_preprocessor() -> CICIDSPreprocessor | None:
+def load_preprocessor(dataset_type: str | None = DATASET_CICIDS2017):
     """Load the fitted preprocessor if it exists."""
-    if os.path.exists(PREP_PATH):
-        return CICIDSPreprocessor.load(PREP_PATH)
+    path = _first_existing_path(dataset_type, "preprocessor")
+    if path:
+        return joblib.load(path)
     return None
 
 
-def load_self_boundary() -> SelfBoundaryDetector | None:
+def load_self_boundary(dataset_type: str | None = DATASET_CICIDS2017) -> SelfBoundaryDetector | None:
     """Load the trained raw-feature Self-Boundary detector if it exists."""
-    if os.path.exists(SB_PATH):
-        return SelfBoundaryDetector.load(SB_PATH)
+    path = _first_existing_path(dataset_type, "self_boundary")
+    if path:
+        return SelfBoundaryDetector.load(path)
     return None
 
 
-def load_pca_self_boundary() -> SelfBoundaryDetector | None:
+def load_pca_self_boundary(dataset_type: str | None = DATASET_CICIDS2017) -> SelfBoundaryDetector | None:
     """Load the trained PCA-space Self-Boundary detector if it exists."""
-    if os.path.exists(PCA_SB_PATH):
-        return SelfBoundaryDetector.load(PCA_SB_PATH)
+    path = _first_existing_path(dataset_type, "pca_self_boundary")
+    if path:
+        return SelfBoundaryDetector.load(path)
     return None
 
 
-def models_ready() -> bool:
-    """Returns True if trained artefacts exist on disk."""
-    return all(os.path.exists(p) for p in [NSA_PATH, ISO_PATH, PREP_PATH, SB_PATH])
+def result_path(dataset_type: str | None = DATASET_CICIDS2017) -> str:
+    path = _first_existing_path(dataset_type, "results")
+    return path or artifact_paths(dataset_type).results
+
+
+def models_ready(dataset_type: str | None = DATASET_CICIDS2017) -> bool:
+    """Returns True if trained artefacts exist on disk for the dataset profile."""
+    required = ["nsa", "iso", "preprocessor", "self_boundary"]
+    return all(_first_existing_path(dataset_type, attr) for attr in required)

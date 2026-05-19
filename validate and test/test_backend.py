@@ -155,6 +155,39 @@ def _make_cicids_csv(n_benign=80, n_attack=20, inject_inf=False) -> bytes:
     return csv_bytes
 
 
+def _make_nsl_kdd_csv(n_normal=80, n_attack=20, attack_label="neptune", service="http") -> bytes:
+    """Generate a small NSL-KDD CSV-with-headers fixture."""
+    from app.core.nsl_kdd_preprocessor import NSL_KDD_FEATURES
+
+    rng = np.random.default_rng(24)
+    rows = []
+    labels = ["normal"] * n_normal + [attack_label] * n_attack
+    for label in labels:
+        row = {}
+        for col in NSL_KDD_FEATURES:
+            if col == "protocol_type":
+                row[col] = "tcp"
+            elif col == "service":
+                row[col] = service
+            elif col == "flag":
+                row[col] = "SF" if label == "normal" else "S0"
+            elif col in {"land", "logged_in", "root_shell", "su_attempted",
+                         "is_host_login", "is_guest_login"}:
+                row[col] = int(rng.integers(0, 2))
+            else:
+                base = 10 if label == "normal" else 100
+                row[col] = float(base + rng.normal(0, 3))
+        row["label"] = label
+        rows.append(row)
+    return pd.DataFrame(rows).to_csv(index=False).encode()
+
+
+def _make_nsl_kdd_csv_with_labels_column(n_normal=80, n_attack=20) -> bytes:
+    df = pd.read_csv(io.BytesIO(_make_nsl_kdd_csv(n_normal, n_attack)))
+    df = df.rename(columns={"label": "labels"})
+    return df.to_csv(index=False).encode()
+
+
 # ════════════════════════════════════════════════════════════
 print("\n── 1. CIC-IDS-2017 Preprocessor ───────────────────────────────")
 # ════════════════════════════════════════════════════════════
@@ -287,6 +320,60 @@ test("Preprocessor — inference column alignment",                      test_in
 test("Preprocessor — save/load consistent",                            test_persistence)
 test("Preprocessor — all-BENIGN dataset supported",                   test_benign_only_returns_no_normal_in_X_normal)
 test("Preprocessor — feature count in expected range (~75)",           test_feature_count_reasonable)
+
+
+# ════════════════════════════════════════════════════════════
+print("\n── 1b. NSL-KDD Preprocessor ───────────────────────────────────")
+# ════════════════════════════════════════════════════════════
+from app.core.nsl_kdd_preprocessor import NSLKDDPreprocessor
+
+def test_nsl_kdd_load_and_label():
+    csv = _make_nsl_kdd_csv(60, 20)
+    prep = NSLKDDPreprocessor(n_pca_components=0.95)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
+    assert prep.is_fitted_
+    assert X_normal.ndim == 2
+    assert len(y) == 80
+    assert (y == 0).sum() == 60
+    assert (y == 1).sum() == 20
+    assert prep.feature_columns_
+    assert "attack_category" in df.columns
+    assert prep.validation_stats(y, df)["dataset"] == "NSL-KDD"
+
+def test_nsl_kdd_unknown_category_safe():
+    train_csv = _make_nsl_kdd_csv(80, 0, service="http")
+    test_csv = _make_nsl_kdd_csv(10, 5, attack_label="satan", service="new_service")
+    prep = NSLKDDPreprocessor(n_pca_components=10)
+    df_train = prep._load(train_csv)
+    df_train, label_col = prep._find_label_col(df_train)
+    df_train, y = prep._encode_labels(df_train, label_col)
+    prep.fit(df_train.loc[y == 0])
+    X, df = prep.transform(test_csv)
+    assert X.shape[0] == 15
+    assert np.isfinite(X).all()
+    assert "Probe" in set(df["attack_category"])
+
+def test_nsl_kdd_labels_column_variant():
+    csv = _make_nsl_kdd_csv_with_labels_column(60, 20)
+    prep = NSLKDDPreprocessor(n_pca_components=10)
+    X_normal, y, df = prep.fit_transform_unsafe_single_dataset(csv)
+    assert X_normal.shape[0] == 60
+    assert (y == 1).sum() == 20
+    assert "attack_category" in df.columns
+
+def test_nsl_kdd_mixed_fit_blocked():
+    prep = NSLKDDPreprocessor()
+    try:
+        prep.fit_transform(_make_nsl_kdd_csv(20, 10))
+    except ValueError as exc:
+        assert "Unsafe mixed labelled fit_transform" in str(exc)
+    else:
+        raise AssertionError("NSL-KDD mixed labelled fit_transform should be blocked")
+
+test("NSL-KDD — CSV labels and attack categories load",       test_nsl_kdd_load_and_label)
+test("NSL-KDD — unseen categorical values do not crash",      test_nsl_kdd_unknown_category_safe)
+test("NSL-KDD — 'labels' column variant is accepted",         test_nsl_kdd_labels_column_variant)
+test("NSL-KDD — mixed labelled fit_transform is blocked",     test_nsl_kdd_mixed_fit_blocked)
 
 
 # ════════════════════════════════════════════════════════════
@@ -551,8 +638,36 @@ def test_pipeline_result_saved():
     assert 'nsa_eval' in data
     assert 'iso_eval' in data
 
+def test_pipeline_nsl_kdd_separate_artifacts():
+    import json
+    from app.core.datasets import artifact_paths
+    from app.core.pipeline import models_ready, result_path
+
+    csv = _make_nsl_kdd_csv(n_normal=120, n_attack=40)
+    pipeline = TrainingPipeline(
+        r=0.3, r_s=0.02, max_detectors=40, max_attempts=1200,
+        contamination=0.1, test_size=0.25, random_state=11,
+        n_pca_components=10, dataset_type="nsl_kdd",
+    )
+    result = pipeline.run(csv)
+    paths = artifact_paths("nsl_kdd")
+
+    assert result["dataset_type"] == "nsl_kdd"
+    assert result["validation_stats"]["dataset"] == "NSL-KDD"
+    assert result["validation_mode"] == "strict_unsupervised_benign_fusion_calibrated"
+    assert result["post_run_labelled_verification"]["available"] is True
+    assert models_ready("nsl_kdd") is True
+    assert os.path.exists(paths.preprocessor)
+    assert os.path.exists(paths.nsa)
+    assert os.path.exists(paths.results)
+    assert "nsl_kdd" in paths.results.replace("\\", "/")
+    with open(result_path("nsl_kdd")) as f:
+        saved = json.load(f)
+    assert saved["dataset_type"] == "nsl_kdd"
+
 test("Pipeline — end-to-end CIC-IDS-2017 training + evaluation", test_pipeline_cicids)
 test("Pipeline — result JSON persisted to disk",                  test_pipeline_result_saved)
+test("Pipeline — NSL-KDD trains into separate artifacts",         test_pipeline_nsl_kdd_separate_artifacts)
 
 
 # ════════════════════════════════════════════════════════════
@@ -657,9 +772,27 @@ def test_detection_with_iso_model():
     for alert in result['alerts']:
         assert alert['anomaly_sources'] == ['isolation_forest']
 
+def test_detection_nsl_kdd_batch_result():
+    nsa = load_nsa("nsl_kdd")
+    prep = load_preprocessor("nsl_kdd")
+    sb = load_self_boundary("nsl_kdd")
+    pca_sb = load_pca_self_boundary("nsl_kdd")
+    assert nsa is not None and prep is not None
+    engine = DetectionEngine(nsa, prep, active_model="nsa", self_boundary=sb, pca_self_boundary=pca_sb)
+    result = engine.detect_from_csv(_make_nsl_kdd_csv(n_normal=20, n_attack=10), filename="nsl_fixture.csv")
+    assert result["dataset_type"] == "nsl_kdd"
+    assert result["batch_only"] is True
+    assert result["total_checked"] == 30
+    assert "threshold_analysis" in result
+    assert result["threshold_analysis"]["verification_only"] is True
+    for alert in result["alerts"]:
+        assert alert["src_ip"] == "N/A"
+        assert alert["attack_type"] in {"Unknown Anomaly", "Zero-Day Candidate"}
+
 test("Detection — result structure has all required keys",          test_detection_result_structure)
 test("Detection — every alert has required fields & valid severity", test_detection_alert_fields)
 test("Detection — Isolation Forest model also works",               test_detection_with_iso_model)
+test("Detection — NSL-KDD batch verification works",                test_detection_nsl_kdd_batch_result)
 
 
 # ════════════════════════════════════════════════════════════
@@ -773,6 +906,213 @@ test("NSA geometry — distance separation correct (in/out sphere)",    test_nsa
 test("NSA geometry — F1/recall/precision ≥ 0.95 on synthetic data",   test_nsa_f1_on_synthetic)
 test("NSA V-Detector — radii are genuinely variable",                  test_nsa_vdetector_radii)
 test("NSA V-Detector — detectors catch attacks (primary mechanism)",   test_nsa_detector_primary_classification)
+
+
+# ════════════════════════════════════════════════════════════
+print("\n── 8. CICFlowMeter Capture Adapter ─────────────────────────────")
+# ════════════════════════════════════════════════════════════
+from app.core.cicflow_bridge import CICFlowMeterAdapter
+
+def _make_cicflow_row(**overrides):
+    row = {
+        "src_ip": "10.0.0.1",
+        "dst_ip": "10.0.0.2",
+        "src_port": 12345,
+        "dst_port": 80,
+        "protocol": 6,
+        "flow_duration": 0.125,
+        "tot_fwd_pkts": 3,
+        "tot_bwd_pkts": 2,
+        "totlen_fwd_pkts": 900,
+        "totlen_bwd_pkts": 400,
+        "flow_iat_mean": 0.010,
+        "flow_iat_std": 0.002,
+        "flow_iat_max": 0.020,
+        "flow_iat_min": 0.001,
+        "fwd_iat_tot": 0.030,
+        "fwd_iat_mean": 0.015,
+        "fwd_iat_std": 0.005,
+        "fwd_iat_max": 0.020,
+        "fwd_iat_min": 0.010,
+        "bwd_iat_tot": 0.040,
+        "bwd_iat_mean": 0.020,
+        "bwd_iat_std": 0.004,
+        "bwd_iat_max": 0.025,
+        "bwd_iat_min": 0.015,
+        "active_mean": 0.050,
+        "active_std": 0.001,
+        "active_max": 0.060,
+        "active_min": 0.040,
+        "idle_mean": 0.100,
+        "idle_std": 0.010,
+        "idle_max": 0.120,
+        "idle_min": 0.090,
+        "fwd_pkt_len_max": 300,
+        "fwd_pkt_len_min": 100,
+        "fwd_pkt_len_mean": 200,
+        "fwd_pkt_len_std": 20,
+        "bwd_pkt_len_max": 200,
+        "bwd_pkt_len_min": 80,
+        "bwd_pkt_len_mean": 120,
+        "bwd_pkt_len_std": 15,
+        "flow_byts_s": 10400,
+        "flow_pkts_s": 40,
+        "fwd_header_len": 60,
+        "bwd_header_len": 40,
+        "fwd_pkts_s": 24,
+        "bwd_pkts_s": 16,
+        "pkt_len_min": 80,
+        "pkt_len_max": 300,
+        "pkt_len_mean": 180,
+        "pkt_len_std": 40,
+        "pkt_len_var": 1600,
+        "fin_flag_cnt": 0,
+        "syn_flag_cnt": 1,
+        "rst_flag_cnt": 0,
+        "psh_flag_cnt": 1,
+        "ack_flag_cnt": 4,
+        "urg_flag_cnt": 0,
+        "ece_flag_cnt": 0,
+        "cwr_flag_count": 7,
+        "down_up_ratio": 0.67,
+        "pkt_size_avg": 180,
+        "fwd_seg_size_avg": 200,
+        "bwd_seg_size_avg": 120,
+        "fwd_byts_b_avg": 900,
+        "fwd_pkts_b_avg": 3,
+        "fwd_blk_rate_avg": 1000,
+        "bwd_byts_b_avg": 400,
+        "bwd_pkts_b_avg": 2,
+        "bwd_blk_rate_avg": 900,
+        "subflow_fwd_pkts": 3,
+        "subflow_fwd_byts": 900,
+        "subflow_bwd_pkts": 2,
+        "subflow_bwd_byts": 400,
+        "init_fwd_win_byts": 8192,
+        "init_bwd_win_byts": 8192,
+        "fwd_act_data_pkts": 3,
+        "fwd_seg_size_min": 20,
+        "fwd_psh_flags": 1,
+        "bwd_psh_flags": 0,
+        "fwd_urg_flags": 0,
+        "bwd_urg_flags": 0,
+    }
+    row.update(overrides)
+    return row
+
+def test_cicflow_adapter_converts_seconds_to_microseconds():
+    seen = []
+    adapter = CICFlowMeterAdapter(seen.append)
+    adapter.handle_flow(_make_cicflow_row())
+    assert len(seen) == 1
+    out = seen[0]
+    assert out["Flow Duration"] == 125000.0
+    assert out["Flow IAT Mean"] == 10000.0
+    assert out["Fwd IAT Total"] == 30000.0
+    assert out["Bwd IAT Max"] == 25000.0
+    assert out["Active Mean"] == 50000.0
+    assert out["Idle Max"] == 120000.0
+
+def test_cicflow_adapter_drops_single_packet_flows():
+    seen = []
+    adapter = CICFlowMeterAdapter(seen.append)
+    adapter.handle_flow(_make_cicflow_row(tot_fwd_pkts=1, tot_bwd_pkts=0))
+    assert seen == []
+    assert adapter.flows_dropped == 1
+
+def test_cicflow_adapter_fills_schema_and_keeps_metadata():
+    seen = []
+    adapter = CICFlowMeterAdapter(seen.append, feature_columns=["Flow Duration", "Missing Feature"])
+    adapter.handle_flow(_make_cicflow_row())
+    out = seen[0]
+    assert out["Missing Feature"] == 0.0
+    assert out["_src_ip"] == "10.0.0.1"
+    assert out["_dst_ip"] == "10.0.0.2"
+    assert out["_dst_port"] == 80
+    assert out["_protocol"] == 6
+
+def test_cicflow_adapter_covers_trained_column_aliases():
+    seen = []
+    feature_columns = [
+        "Protocol",
+        "Fwd Packets Length Total",
+        "Bwd Packets Length Total",
+        "Packet Length Min",
+        "Packet Length Max",
+        "Avg Packet Size",
+        "Init Fwd Win Bytes",
+        "Init Bwd Win Bytes",
+        "Fwd Act Data Packets",
+        "Fwd Seg Size Min",
+    ]
+    adapter = CICFlowMeterAdapter(seen.append, feature_columns=feature_columns)
+    adapter.handle_flow(_make_cicflow_row())
+    out = seen[0]
+
+    assert out["Protocol"] == 6.0
+    assert out["Fwd Packets Length Total"] == 900.0
+    assert out["Bwd Packets Length Total"] == 400.0
+    assert out["Packet Length Min"] == 80.0
+    assert out["Packet Length Max"] == 300.0
+    assert out["Avg Packet Size"] == 180.0
+    assert out["Init Fwd Win Bytes"] == 8192.0
+    assert out["Init Bwd Win Bytes"] == 8192.0
+    assert out["Fwd Act Data Packets"] == 3.0
+    assert out["Fwd Seg Size Min"] == 20.0
+
+def test_cicflow_adapter_ignores_bad_cwr_alias():
+    seen = []
+    adapter = CICFlowMeterAdapter(seen.append)
+    adapter.handle_flow(_make_cicflow_row(cwr_flag_count=99, fwd_urg_flags=88))
+    assert seen[0]["CWE Flag Count"] == 0.0
+    assert seen[0]["Fwd URG Flags"] == 88.0
+
+def test_cicflow_mode_prevents_short_idle_microflow_scoring():
+    from decimal import Decimal
+    from app.core.cicflow_bridge import CICFlowMeterSniffer
+
+    class Flow:
+        start_timestamp = Decimal("90.0")
+        latest_timestamp = Decimal("96.5")
+        packets = []
+
+    sniffer = CICFlowMeterSniffer(lambda _row: None, flow_mode="cic_compatible")
+    now = Decimal("100.0")
+
+    assert sniffer._is_flow_ready(Flow(), now, terminal_only=True) is False
+    assert sniffer._is_flow_ready(Flow(), now, terminal_only=False) is True
+
+def test_cicflow_mode_still_emits_terminal_tcp_flows():
+    from decimal import Decimal
+    from app.core.cicflow_bridge import CICFlowMeterSniffer
+
+    class Tcp:
+        flags = 1
+
+    class Packet:
+        def __contains__(self, item):
+            return item == "TCP"
+
+        def __getitem__(self, item):
+            if item == "TCP":
+                return Tcp()
+            raise KeyError(item)
+
+    class Flow:
+        start_timestamp = Decimal("99.0")
+        latest_timestamp = Decimal("99.8")
+        packets = [(Packet(), None)]
+
+    sniffer = CICFlowMeterSniffer(lambda _row: None, flow_mode="cic_compatible")
+    assert sniffer._is_flow_ready(Flow(), Decimal("100.0"), terminal_only=True) is True
+
+test("CICFlow adapter — converts time fields to microseconds", test_cicflow_adapter_converts_seconds_to_microseconds)
+test("CICFlow adapter — drops single-packet flows",            test_cicflow_adapter_drops_single_packet_flows)
+test("CICFlow adapter — fills schema and preserves metadata",  test_cicflow_adapter_fills_schema_and_keeps_metadata)
+test("CICFlow adapter — covers trained column aliases",        test_cicflow_adapter_covers_trained_column_aliases)
+test("CICFlow adapter — ignores incorrect CWR alias",          test_cicflow_adapter_ignores_bad_cwr_alias)
+test("CICFlow mode — CIC-compatible blocks short idle scoring", test_cicflow_mode_prevents_short_idle_microflow_scoring)
+test("CICFlow mode — CIC-compatible emits terminal TCP flows",  test_cicflow_mode_still_emits_terminal_tcp_flows)
 
 
 # ════════════════════════════════════════════════════════════

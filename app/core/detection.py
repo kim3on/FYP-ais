@@ -15,14 +15,14 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from typing import Optional
 import uuid
 
+from app.core.datasets import DATASET_NSL_KDD, dataset_display_name, normalize_dataset_type
 from app.core.preprocessor import CICIDSPreprocessor
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
-    assess_metric,
     compute_silhouette_metric,
     evaluate_model,
     severity_from_score,
@@ -98,6 +98,9 @@ class DetectionEngine:
         self.active_model = active_model
         self.self_boundary = self_boundary
         self.pca_self_boundary = pca_self_boundary
+        self.dataset_type = normalize_dataset_type(
+            getattr(preprocessor, "dataset_type", None)
+        )
 
     # ------------------------------------------------------------------ #
     #  BATCH DETECTION (CSV upload)                                        #
@@ -369,7 +372,11 @@ class DetectionEngine:
 
             # ── Layer 2: Attack Attribution (NEVER uses labels) ─────────
             # The attack_category column is intentionally NOT passed here.
-            attack_family = self._attribute_attack(row, novelty_score=score)
+            attack_family = (
+                "Unknown Anomaly"
+                if self.dataset_type == DATASET_NSL_KDD
+                else self._attribute_attack(row, novelty_score=score)
+            )
             is_zero_day = (attack_family == 'Zero-Day Candidate')
 
             # Attribution confidence based on how many sources agree
@@ -461,6 +468,9 @@ class DetectionEngine:
             "alerts":             alerts,
             "severity_counts":    self._count_severities(alerts),
             "model_used":         self.active_model,
+            "dataset_type":       self.dataset_type,
+            "dataset_display":    dataset_display_name(self.dataset_type),
+            "batch_only":         self.dataset_type == DATASET_NSL_KDD,
             "analysed_at":        datetime.now(timezone.utc).isoformat(),
             "metric_explanations": METRIC_EXPLANATIONS,
             "detection_architecture": detection_architecture,

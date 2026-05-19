@@ -19,10 +19,11 @@ from app.core.pipeline import (
     MAX_TRAINING_DETECTORS,
     MIN_BENIGN_ROWS_HARD,
     MIN_TRAINING_DETECTORS,
-    RESULTS_PATH,
     TrainingPipeline,
+    result_path,
 )
-from app.state import _state
+from app.core.datasets import DATASET_CICIDS2017, DATASET_NSL_KDD, normalize_dataset_type
+from app.state import _state, save_runtime_settings
 from app.routers.auth import get_current_user
 
 router = APIRouter(
@@ -45,6 +46,7 @@ async def train(
     n_pca_components: int | None = 25,
     target_fpr:     float = 0.05,
     benign_row_limit: int | None = 20_000,
+    dataset_type:    str = DATASET_CICIDS2017,
 ):
     """
     Upload a training dataset (CSV or Parquet) and start the training pipeline.
@@ -61,9 +63,16 @@ async def train(
     if _state["status"] == "learning":
         raise HTTPException(status_code=409, detail="Training already in progress")
 
+    try:
+        _dataset_type = normalize_dataset_type(dataset_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     fname = (file.filename or "").lower()
-    if not any(fname.endswith(ext) for ext in ('.csv', '.parquet', '.pq', '')):
-        raise HTTPException(status_code=400, detail="Only .csv or .parquet files accepted")
+    allowed_exts = (".csv",) if _dataset_type == DATASET_NSL_KDD else ('.csv', '.parquet', '.pq', '')
+    if not any(fname.endswith(ext) for ext in allowed_exts):
+        expected = ".csv" if _dataset_type == DATASET_NSL_KDD else ".csv or .parquet"
+        raise HTTPException(status_code=400, detail=f"Only {expected} files accepted")
 
     dataset_bytes     = await file.read()
     upload_filename   = file.filename or ""
@@ -100,10 +109,13 @@ async def train(
                 n_pca_components=_n_pca,
                 target_fpr=_target_fpr,
                 benign_row_limit=_benign_row_limit,
+                dataset_type=_dataset_type,
             )
             result = pipeline.run(dataset_bytes, log_callback=log_cb, filename=upload_filename)
             _state["last_result"] = result
+            _state["active_dataset_type"] = _dataset_type
             _state["status"] = "active"
+            save_runtime_settings()
         except Exception as e:
             _state["status"] = "error"
             _state["training_logs"].append(f"[ERROR] Training failed: {e}")
@@ -122,6 +134,7 @@ async def train(
             "test_size":     _test_size,
             "n_pca_components": _n_pca,
             "benign_row_limit": _benign_row_limit,
+            "dataset_type": _dataset_type,
         },
     }
 
@@ -133,13 +146,18 @@ async def training_logs():
 
 
 @router.get("/result")
-async def training_result():
+async def training_result(dataset_type: str | None = None):
     """Return the last completed training result."""
-    if _state["last_result"]:
+    selected = dataset_type or _state.get("active_dataset_type", DATASET_CICIDS2017)
+    if _state["last_result"] and (
+        dataset_type is None
+        or _state["last_result"].get("dataset_type") == normalize_dataset_type(selected)
+    ):
         return _state["last_result"]
 
-    if os.path.exists(RESULTS_PATH):
-        with open(RESULTS_PATH) as f:
+    path = result_path(selected)
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
 
     raise HTTPException(status_code=404, detail="No training result available yet")

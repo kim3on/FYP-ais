@@ -21,6 +21,7 @@ from app.core.pipeline import (
     load_pca_self_boundary,
     models_ready,
 )
+from app.core.datasets import DATASET_CICIDS2017, dataset_display_name
 from app.schemas import SettingsUpdate
 from app.state import _state, save_runtime_settings
 from app.routers.auth import get_current_user
@@ -35,12 +36,15 @@ router = APIRouter(tags=["dashboard"])
 @router.get("/api/system/status")
 async def system_status(user=Depends(get_current_user)):
     """System health and model readiness."""
-    ready = models_ready()
-    nsa   = load_nsa()
+    dataset_type = _state.get("active_dataset_type", DATASET_CICIDS2017)
+    ready = models_ready(dataset_type)
+    nsa   = load_nsa(dataset_type)
     return {
         "status":         _state["status"] if ready else "idle",
         "models_ready":   ready,
         "active_model":   _state["active_model"],
+        "active_dataset_type": dataset_type,
+        "dataset_display": dataset_display_name(dataset_type),
         "packet_count":   _state["packet_count"],
         "anomaly_count":  _state["anomaly_count"],
         "antibody_count": nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0,
@@ -70,7 +74,7 @@ async def dashboard_stats(user=Depends(get_current_user)):
     finally:
         db.close()
 
-    nsa        = load_nsa()
+    nsa        = load_nsa(DATASET_CICIDS2017)
     antibodies = nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0
 
     return {
@@ -90,16 +94,19 @@ async def dashboard_stats(user=Depends(get_current_user)):
 @router.get("/api/model/summary")
 async def model_summary(user=Depends(get_current_user)):
     """Return metadata for both trained models."""
-    nsa = load_nsa()
-    iso = load_iso()
-    raw_sb = load_self_boundary()
-    pca_sb = load_pca_self_boundary()
+    dataset_type = _state.get("active_dataset_type", DATASET_CICIDS2017)
+    nsa = load_nsa(dataset_type)
+    iso = load_iso(dataset_type)
+    raw_sb = load_self_boundary(dataset_type)
+    pca_sb = load_pca_self_boundary(dataset_type)
     nsa_summary = nsa.summary() if nsa else {"status": "not_trained"}
     return {
         "nsa":              nsa_summary,
         "isolation_forest": iso.summary()  if iso  else {"status": "not_trained"},
         "raw_self_boundary_evidence": raw_sb.summary() if raw_sb else {"status": "not_trained"},
         "pca_self_boundary": pca_sb.summary() if pca_sb else {"status": "not_trained"},
+        "dataset_type": dataset_type,
+        "dataset_display": dataset_display_name(dataset_type),
         "ais_detection": {
             "detector_count": nsa_summary.get("mature_detectors", 0),
             "fusion_mode": "NSA + PCA-space Self-Boundary + benign-calibrated fusion threshold",
@@ -118,17 +125,21 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
             raise HTTPException(status_code=400, detail="Invalid active_model")
 
         if settings.active_model == "nsa":
-            model = load_nsa()
+            model = load_nsa(_state.get("active_dataset_type", DATASET_CICIDS2017))
             if model is None or not getattr(model, "is_fitted_", False):
                 raise HTTPException(status_code=400, detail="NSA model is not trained")
         else:
-            model = load_iso()
+            model = load_iso(_state.get("active_dataset_type", DATASET_CICIDS2017))
             if model is None or not getattr(model, "is_fitted_", False):
                 raise HTTPException(status_code=400, detail="Isolation Forest model is not trained")
 
         _state["active_model"] = settings.active_model
         save_runtime_settings()
-    return {"success": True, "active_model": _state["active_model"]}
+    return {
+        "success": True,
+        "active_model": _state["active_model"],
+        "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════

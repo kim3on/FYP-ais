@@ -18,6 +18,8 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, De
 from sqlalchemy.orm import Session
 
 from app.core.pipeline import models_ready
+from app.core.datasets import DATASET_CICIDS2017
+from app.core.capture_factory import get_packet_sniffer_class
 from app.state import _state, _build_engine
 from app.core.database import get_db, SessionLocal
 from app.models.db_models import RawFlowDB, AlertDB
@@ -40,21 +42,29 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
     if _state["capture_active"]:
         raise HTTPException(status_code=409, detail="Capture already running")
 
-    if not models_ready():
+    if _state.get("active_dataset_type") != DATASET_CICIDS2017:
+        raise HTTPException(
+            status_code=400,
+            detail="Live capture is CICIDS2017-only. NSL-KDD models are batch benchmark models and cannot score live CICFlowMeter features.",
+        )
+
+    if not models_ready(DATASET_CICIDS2017):
         raise HTTPException(
             status_code=400,
             detail="Models not trained yet. Train first, then start capture.",
         )
 
     try:
-        from app.core.capture import PacketSniffer
+        PacketSniffer, capture_engine = get_packet_sniffer_class()
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="Scapy not installed. Run: pip install scapy",
+            detail=(
+                "CICFlowMeter capture dependency not installed. Install requirements."
+            ),
         )
 
-    engine = _build_engine()
+    engine = _build_engine(DATASET_CICIDS2017)
     loop   = asyncio.get_running_loop()
 
     def on_flow(features: dict):
@@ -144,14 +154,35 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
         asyncio.run_coroutine_threadsafe(_broadcast_live_update(result, meta), loop)
 
     _state["sniffer_error"] = None
-    sniffer = PacketSniffer(on_flow_complete=on_flow, interface=interface)
-    sniffer.start()
+    feature_columns = list(getattr(engine.preprocessor, "feature_columns_", None) or [])
+    sniffer = PacketSniffer(
+        on_flow_complete=on_flow,
+        interface=interface,
+        feature_columns=feature_columns,
+    )
+    try:
+        sniffer.start()
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "CICFlowMeter capture dependency is missing. Install requirements."
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Live capture failed to start: {exc}")
+
+    if getattr(sniffer, "error", None) and not sniffer.is_running:
+        raise HTTPException(status_code=500, detail=sniffer.error)
+
     _state["sniffer"]        = sniffer
     _state["capture_active"] = True
 
     return {
         "message":   "Live capture started",
         "interface": interface or "default",
+        "capture_engine": capture_engine,
+        "flow_mode": getattr(sniffer, "flow_mode", None) or "unknown",
         "status":    "capturing",
     }
 
@@ -165,7 +196,7 @@ async def stop_capture(user=Depends(get_current_user)):
     sniffer = _state.get("sniffer")
     packets_captured = sniffer.packets_captured if sniffer else _state["packet_count"]
     if sniffer:
-        sniffer.stop(flush=True)
+        sniffer.stop(flush=False)
 
     _state["capture_active"] = False
     _state["sniffer"]        = None
@@ -200,6 +231,8 @@ async def capture_status(user=Depends(get_current_user)):
         "sniffer_packets":  sniffer_packets,
         "sniffer_error":    _state.get("sniffer_error"),
         "interface":        getattr(sniffer, "resolved_interface", None) or "default",
+        "capture_engine":   getattr(sniffer, "capture_engine", None) or "none",
+        "flow_mode":        getattr(sniffer, "flow_mode", None) or "none",
     }
 
 

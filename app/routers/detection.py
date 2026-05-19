@@ -14,6 +14,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.core.pipeline import models_ready
+from app.core.datasets import DATASET_CICIDS2017, normalize_dataset_type
 from app.state import _state, _build_engine
 from app.routers.auth import get_current_user
 
@@ -30,6 +31,7 @@ async def detect(
     file: UploadFile = File(...),
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    dataset_type: str = DATASET_CICIDS2017,
     limit_form: Optional[int] = Form(None, alias="limit"),
     offset_form: Optional[int] = Form(None, alias="offset"),
 ):
@@ -38,16 +40,23 @@ async def detect(
     in the background.  Returns immediately; poll /api/detect/logs for
     progress and /api/detect/result for the final result.
     """
-    if not models_ready():
+    try:
+        _dataset_type = normalize_dataset_type(dataset_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not models_ready(_dataset_type):
         raise HTTPException(
             status_code=400,
-            detail="Models not trained yet. Please upload a dataset and train first.",
+            detail=f"{_dataset_type} models not trained yet. Please upload a matching dataset and train first.",
         )
     if _state["detect_status"] == "running":
         raise HTTPException(status_code=409, detail="Detection already in progress")
 
     dataset_bytes   = await file.read()
     upload_filename = file.filename or ""
+    if _dataset_type != DATASET_CICIDS2017 and not upload_filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="NSL-KDD detection accepts CSV-with-headers files only")
 
     _state["detect_status"]      = "running"
     _state["detect_logs"]        = []
@@ -71,7 +80,8 @@ async def detect(
             if _offset:
                 dlog(f"[DETECT] Start row offset: {_offset:,}")
 
-            engine = _build_engine()
+            engine = _build_engine(_dataset_type)
+            dlog(f"[DETECT] Dataset: {_dataset_type}")
             dlog(f"[DETECT] Model: {_state['active_model'].upper()}")
             dlog("[DETECT] Loading and preprocessing file...")
 
@@ -167,10 +177,16 @@ async def detect_sample(features: dict):
     Detect anomaly in a single network flow (JSON body = feature dict).
     Useful for real-time per-packet monitoring from a packet sniffer.
     """
-    if not models_ready():
+    if _state.get("active_dataset_type") != DATASET_CICIDS2017:
+        raise HTTPException(
+            status_code=400,
+            detail="Live/sample detection is CICIDS2017-only. Train or select a CICIDS2017 model for live capture.",
+        )
+
+    if not models_ready(DATASET_CICIDS2017):
         raise HTTPException(status_code=400, detail="Models not trained")
 
-    engine = _build_engine()
+    engine = _build_engine(DATASET_CICIDS2017)
     result = engine.detect_sample(features)
     _state["packet_count"] += 1
     if result["anomalies_found"] > 0:

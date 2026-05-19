@@ -26,6 +26,7 @@ Production  : Run `npm run build` in frontend/ — output lands in
               so the entire app is served from a single uvicorn process.
 """
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -40,6 +41,21 @@ from app.models.db_models import Base, BlockedIPDB, UserDB
 from app.core.database import SessionLocal
 from app.routers.firewall import _blocked_ips
 
+def _cors_origins() -> list[str]:
+    raw = os.getenv("AIS_CORS_ORIGINS", "*")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["*"]
+
+
+def _seed_password(env_name: str, fallback: str) -> str:
+    password = os.getenv(env_name)
+    if password:
+        return password
+    if os.getenv("AIS_DEPLOYMENT_MODE", "").lower() in {"production", "prod"}:
+        raise RuntimeError(f"{env_name} must be set when AIS_DEPLOYMENT_MODE=production")
+    return fallback
+
+
 # ── App factory ──────────────────────────────────────────────────────────
 app = FastAPI(
     title="AIS-Detect API",
@@ -49,7 +65,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # tighten in production
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,8 +90,16 @@ def on_startup():
     # Seed users if database is empty
     if db.query(UserDB).count() == 0:
         db.add_all([
-            UserDB(username="admin", password=get_password_hash("password"), role="Network Administrator"),
-            UserDB(username="analyst", password=get_password_hash("analyst123"), role="Security Analyst")
+            UserDB(
+                username=os.getenv("AIS_ADMIN_USERNAME", "admin"),
+                password=get_password_hash(_seed_password("AIS_ADMIN_PASSWORD", "password")),
+                role="Network Administrator",
+            ),
+            UserDB(
+                username=os.getenv("AIS_ANALYST_USERNAME", "analyst"),
+                password=get_password_hash(_seed_password("AIS_ANALYST_PASSWORD", "analyst123")),
+                role="Security Analyst",
+            ),
         ])
         db.commit()
 

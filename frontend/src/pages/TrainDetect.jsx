@@ -11,6 +11,52 @@ import shieldIcon from '../assets/shield.svg';
 import chartArrowRiseIcon from '../assets/chart-arrow-rise.svg';
 import databaseIcon from '../assets/database.svg';
 
+const DATASET_OPTIONS = [
+  {
+    id: 'cicids2017',
+    label: 'CICIDS2017',
+    hint: 'Live-compatible flow features',
+    accept: '.csv,.parquet,.pq',
+    dropText: <>Drop a <span>.csv</span> or <span>.parquet</span> file</>,
+  },
+  {
+    id: 'nsl_kdd',
+    label: 'NSL-KDD Benchmark',
+    hint: 'Batch-only CSV with headers',
+    accept: '.csv',
+    dropText: <>Drop a <span>.csv</span> file</>,
+  },
+];
+
+function DatasetSelector({ value, onChange }) {
+  const selected = DATASET_OPTIONS.find(option => option.id === value) || DATASET_OPTIONS[0];
+  return (
+    <>
+      <div className="td-selected-dataset">
+        <span>Selected Profile</span>
+        <strong>{selected.label}</strong>
+      </div>
+      <div className="td-dataset-selector">
+        {DATASET_OPTIONS.map(option => (
+          <button
+            key={option.id}
+            type="button"
+            className={`td-dataset-option ${value === option.id ? 'active' : ''}`}
+            aria-pressed={value === option.id}
+            onClick={() => onChange(option.id)}
+          >
+            <span className="td-dataset-option-head">
+              <span>{option.label}</span>
+              {value === option.id && <strong>Selected</strong>}
+            </span>
+            <small>{option.hint}</small>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ── Shared log box component ───────────────────────────────────
 function LogBox({ lines, height = '220px' }) {
   const ref = useRef(null);
@@ -31,7 +77,7 @@ function LogBox({ lines, height = '220px' }) {
 }
 
 // ── FileDropZone ───────────────────────────────────────────────
-function FileDropZone({ file, onFile, inputId, icon = '📂' }) {
+function FileDropZone({ file, onFile, inputId, icon = '📂', accept = '.csv,.parquet,.pq', dropText = null }) {
   const [dragging, setDragging] = useState(false);
   return (
     <>
@@ -45,10 +91,10 @@ function FileDropZone({ file, onFile, inputId, icon = '📂' }) {
         <div className="drop-icon">{icon}</div>
         {file
           ? <p><span>{file.name}</span><br /><small style={{ color: 'var(--text-tertiary)' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</small></p>
-          : <p>Drop a <span>.csv</span> or <span>.parquet</span> file<br /><small style={{ color: 'var(--text-tertiary)' }}>or click to browse</small></p>
+          : <p>{dropText || <>Drop a <span>.csv</span> or <span>.parquet</span> file</>}<br /><small style={{ color: 'var(--text-tertiary)' }}>or click to browse</small></p>
         }
       </div>
-      <input id={inputId} type="file" accept=".csv,.parquet,.pq" style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])} />
+      <input id={inputId} type="file" accept={accept} style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])} />
     </>
   );
 }
@@ -161,7 +207,8 @@ function TrainingTab() {
     rsRadius, setRS,
     trainLogs: logs, setTrainLogs: setLogs,
     setTrainResult: setResult,
-    refreshStatus
+    refreshStatus,
+    datasetType, setDatasetType
   } = useApp();
 
   const [loading, setLoading]   = useState(false);
@@ -184,6 +231,7 @@ function TrainingTab() {
         r: rRadius,
         r_s: rsRadius,
         target_fpr: 0.05,
+        dataset_type: datasetType,
         ...(benignRowLimit ? { benign_row_limit: benignRowLimit } : {}),
       });
 
@@ -231,14 +279,32 @@ function TrainingTab() {
     return () => stopPolling();
   }, [setResult]);
 
+  const datasetOption = DATASET_OPTIONS.find(o => o.id === datasetType) || DATASET_OPTIONS[0];
+
   return (
     <div className="tab-body">
       <div className="two-col">
         {/* Left */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div className="card">
+            <div className="td-section-label">Dataset Profile</div>
+            <DatasetSelector value={datasetType} onChange={setDatasetType} />
+            {datasetType === 'nsl_kdd' && (
+              <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                NSL-KDD is an offline benchmark path. Live capture remains CICIDS2017-only.
+              </p>
+            )}
+          </div>
+          <div className="card">
             <div className="td-section-label">Dataset — Clean Traffic</div>
-            <FileDropZone file={file} onFile={setFile} inputId="train-file" icon="📂" />
+            <FileDropZone
+              file={file}
+              onFile={setFile}
+              inputId="train-file"
+              icon="📂"
+              accept={datasetOption.accept}
+              dropText={datasetOption.dropText}
+            />
           </div>
           <div className="card">
             <div className="td-section-label">NSA Parameters</div>
@@ -313,7 +379,8 @@ function DetectionTab() {
     detectFile: file, setDetectFile: setFile,
     detectLimit: limit, setDetectLimit: setLimit,
     detectLogs: logs, setDetectLogs: setLogs,
-    detectResult: result, setDetectResult: setResult
+    detectResult: result, setDetectResult: setResult,
+    datasetType, setDatasetType
   } = useApp();
 
   const [offset, setOffset]   = useState(0);
@@ -331,7 +398,7 @@ function DetectionTab() {
     setLogs(['[INFO] Starting batch detection…']);
     try {
       // POST starts detection in background — returns immediately
-      await detectFromFile(file, limit, offset);
+      await detectFromFile(file, limit, offset, { dataset_type: datasetType });
 
       // Poll every 1.5s — REPLACE log array each time
       pollRef.current = setInterval(async () => {
@@ -366,6 +433,7 @@ function DetectionTab() {
   const alerts    = result?.alerts || [];
   const anomCount = alerts.filter(a => !a.is_false_positive).length;
   const zdCount   = alerts.filter(a => a.is_zero_day || a.attack_type === 'Zero-Day Candidate').length;
+  const datasetOption = DATASET_OPTIONS.find(o => o.id === datasetType) || DATASET_OPTIONS[0];
 
   return (
     <div className="tab-body">
@@ -373,8 +441,24 @@ function DetectionTab() {
         {/* Left */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div className="card">
+            <div className="td-section-label">Dataset Profile</div>
+            <DatasetSelector value={datasetType} onChange={setDatasetType} />
+            {datasetType === 'nsl_kdd' && (
+              <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                Batch benchmark only. Use the NSL-KDD model trained under the same profile.
+              </p>
+            )}
+          </div>
+          <div className="card">
             <div className="td-section-label">Traffic Log to Analyse</div>
-            <FileDropZone file={file} onFile={setFile} inputId="det-file" icon="🔍" />
+            <FileDropZone
+              file={file}
+              onFile={setFile}
+              inputId="det-file"
+              icon="🔍"
+              accept={datasetOption.accept}
+              dropText={datasetOption.dropText}
+            />
           </div>
           <div className="card">
             <label>Start Row — <span style={{ color: 'var(--accent)' }}>{offset.toLocaleString()}</span></label>
@@ -461,7 +545,9 @@ function GlobalTrainingResult() {
   const samples = trainResult.nsa_summary?.n_self_samples ?? 0;
   
   let datasetName;
-  if (trainFile?.name) {
+  if (trainResult.dataset_display) {
+    datasetName = trainResult.dataset_display;
+  } else if (trainFile?.name) {
     datasetName = trainFile.name.replace(/\.[^/.]+$/, "");
   } else if (trainResult.nsa_summary?.dataset_name) {
     datasetName = trainResult.nsa_summary.dataset_name;

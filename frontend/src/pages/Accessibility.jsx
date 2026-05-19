@@ -60,7 +60,7 @@ const FAQS = [
   { q: 'What is the Negative Selection Algorithm (NSA)?',
     a: 'The NSA mimics how the human immune system trains T-cells. During training, random detector candidates are generated and any that "react" to known normal (Self) traffic are discarded. Only detectors that ignore normal traffic survive — these are used to flag anomalies.' },
   { q: 'What dataset does AIS-Detect use?',
-    a: 'AIS-Detect is designed for the CIC-IDS-2017 dataset, a benchmark intrusion detection dataset containing labelled network traffic including DoS, DDoS, Brute Force, and Botnet attacks alongside benign traffic.' },
+    a: 'AIS-Detect is designed around CIC-IDS-2017 for live-compatible flow features, and also supports NSL-KDD as a batch-only benchmark. NSL-KDD is not used for live capture because its feature schema is different.' },
   { q: 'What file formats can I upload for training?',
     a: 'Both CSV and Parquet formats are supported. The file must include a "Label" column containing "BENIGN" rows for the NSA to learn from. Feature columns should match the CIC-IDS-2017 schema.' },
   { q: 'How long does training take?',

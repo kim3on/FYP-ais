@@ -6,6 +6,18 @@
 
 ## 🚀 Recent System Updates (May 2026)
 
+### May 17 Update
+- **Dataset Profiles:** Added dataset-specific training/detection profiles. CIC-IDS-2017 remains the live-compatible profile; NSL-KDD is supported as a batch-only benchmark with its own preprocessor and model artifacts.
+- **Dataset-Specific Artefacts:** Trained models now live under dataset-specific artifact folders, preventing CICIDS2017 and NSL-KDD feature schemas from being mixed.
+- **PCA-Space Self-Boundary Fusion:** Added a PCA-space Self-Boundary detector for final fused AIS scoring while keeping raw-feature Self-Boundary evidence for analyst explanations.
+- **Frontend Build Optimization:** Route-level lazy loading reduces the initial React bundle, and Vite now cleans old hashed assets during production builds.
+
+### May 15 ML Integrity Update
+- **Strict BENIGN-Only Calibration:** NSA, Self-Boundary, PCA-Self-Boundary, Isolation Forest, score scales, and thresholds are fitted/calibrated only from BENIGN training/calibration rows.
+- **Conformal Threshold Calibration:** NSA-only, fused AIS, Self-Boundary, and Isolation Forest thresholds use a shared finite-sample conformal helper with calibration reliability metadata.
+- **Detector Source Decomposition:** Training and detection reports include source-level evidence such as `v_detector`, `self_gap`, `score_fusion`, and `pca_self_boundary`.
+- **Higher NSA Capacity:** Default detector generation increased to `max_detectors=3000` and `max_attempts=100000`.
+
 ### May 10 Update
 - **Dashboard UI Refresh:** Reworked the dashboard into focused metric cards for total packets, anomalies detected, active antibodies, and zero-day candidates, with live severity indicators.
 - **Accessibility & Help Centre:** Added a dedicated Accessibility page with getting-started guidance, FAQ, glossary, troubleshooting notes, and WCAG-oriented usability information.
@@ -33,11 +45,14 @@ ais-backend/
 │   ├── core/
 │   │   ├── detection.py # Live Inference Engine
 │   │   ├── pipeline.py  # Leakage-free Training Pipeline
-│   │   └── preprocessor.py # CIC-IDS-2017 Feature Processor
+│   │   ├── preprocessor.py # CIC-IDS-2017 Feature Processor
+│   │   ├── nsl_kdd_preprocessor.py # NSL-KDD Batch Benchmark Processor
+│   │   └── datasets.py  # Dataset profile + artefact path helpers
 │   ├── models/
 │   │   ├── nsa.py       # True V-Detector Negative Selection Model
+│   │   ├── self_boundary.py # Quantile-fence Self-Boundary Model
 │   │   └── isolation_forest.py # Benchmark Baseline
-│   └── artefacts/       # Trained Models & Preprocessor States
+│   └── artefacts/       # Dataset-specific models, DB, and runtime state
 │
 ├── frontend/            # React (Vite) Dashboard
 │   ├── src/pages/       # Dashboard, Training, Detection, Alerts, Settings, Accessibility
@@ -138,8 +153,13 @@ Authorization: Bearer <jwt-token>
 ### Training
 ```
 POST /api/train
-  Form field : file  (CSV or Parquet — CIC-IDS-2017 format)
-  Query params: r, max_detectors, max_attempts, contamination, test_size
+  Form field : file
+  Query params: dataset_type, r, r_s, max_detectors, max_attempts,
+                contamination, test_size, target_fpr, benign_row_limit
+
+Supported dataset profiles:
+  cicids2017  → CSV / Parquet, live-compatible
+  nsl_kdd     → CSV only, batch benchmark
 
 GET  /api/train/logs     → real-time training log lines + status
 GET  /api/train/result   → full evaluation results + model metadata
@@ -148,7 +168,8 @@ GET  /api/train/result   → full evaluation results + model metadata
 ### Detection
 ```
 POST /api/detect
-  Form field: file  (CSV or Parquet network log)
+  Form field: file
+  Query params: dataset_type, limit, offset
   Returns: { total_checked, anomalies_found, alerts, severity_counts, ... }
 
 GET  /api/detect/logs    → streaming detection log + status
@@ -166,7 +187,7 @@ GET  /api/capture/status  → live counters
 GET  /api/capture/interfaces → available network interfaces
 GET  /api/capture/chartdata  → 60-point ring buffer for polling fallback
 
-WS   /ws/live             → WebSocket push (snapshot + per-flow updates)
+WS   /ws/live?token=<jwt> → WebSocket push (snapshot + per-flow updates)
 ```
 
 ### Alerts
@@ -189,7 +210,7 @@ frontend table. It includes derived fields such as `attack_family`,
 ```
 GET  /api/dashboard/stats      → stat card numbers for the frontend
 GET  /api/model/summary        → NSA + IsoForest metadata
-GET  /api/system/status        → active status, packet count, antibody count
+GET  /api/system/status        → active status, dataset profile, packet count, antibody count
 PATCH /api/settings            → switch active model (nsa | isolation_forest)
 GET  /health                   → { status: "ok", version: "4.0.0" }
 ```
@@ -200,13 +221,16 @@ GET  /health                   → { status: "ok", version: "4.0.0" }
 
 | Parameter        | Default | Description |
 |------------------|---------|-------------|
-| `r`              | Auto-calibrated by default | Self-gap threshold. Derived from benign PCA-space distance distribution when `auto_threshold=True`. |
-| `r_s`            | Auto-calibrated by default | Self-tolerance margin for negative selection. Derived from benign nearest-neighbour distances when `auto_threshold=True`. |
-| `max_detectors`  | 1,000   | Max mature antibodies. More = better coverage, slower training. |
-| `max_attempts`   | 30,000  | Max random candidates tried during training. |
-| `contamination`  | 0.05    | IsoForest: expected fraction of attacks in training data. |
+| `dataset_type`   | `cicids2017` | Dataset profile. Use `cicids2017` for live-compatible flow features or `nsl_kdd` for batch-only benchmark CSVs. |
+| `r`              | `0.3` via API | NSA self-gap threshold. Samples far from all self references can be flagged through the self-gap path. |
+| `r_s`            | `0.03` via API | Self-tolerance margin for negative selection. Smaller values let detectors sit closer to the self boundary. |
+| `max_detectors`  | `3,000` | Max mature V-detectors. More = better coverage, slower training. |
+| `max_attempts`   | `100,000` | Max random candidates tried during training. |
+| `target_fpr`     | `0.05` | BENIGN calibration target for NSA/fusion/Self-Boundary/Isolation Forest thresholds. |
+| `benign_row_limit` | `20,000` | Optional cap on BENIGN rows used for laptop-friendly training. |
+| `contamination`  | `0.05` | Isolation Forest fallback contamination; calibrated threshold is preferred. |
 | `test_size`      | 0.2     | Fraction held out for test-set evaluation. |
-| `n_pca_components` | 25 via `/api/train` | PCA component count for API training. The lower-level preprocessor also supports variance targets such as `0.95` when instantiated directly. |
+| `n_pca_components` | `0.95` lower-level default | PCA variance target/component setting used by preprocessors. |
 
 Current preprocessing flow:
 
@@ -215,12 +239,14 @@ Raw CIC-IDS-2017 features
 → clean Inf / NaN / duplicate columns
 → RobustScaler
 → PCA(whiten=True)
-→ NSA / Isolation Forest
+→ NSA V-detectors + PCA Self-Boundary fusion / Isolation Forest baseline
 ```
 
 ---
 
-## Dataset Format (CIC-IDS-2017)
+## Dataset Profiles
+
+### CIC-IDS-2017
 
 The system is trained on **CIC-IDS-2017** (Canadian Institute for Cybersecurity),
 exported from CICFlowMeter as CSV. Key properties:
@@ -238,9 +264,38 @@ exported from CICFlowMeter as CSV. Key properties:
 **Download CIC-IDS-2017:** https://www.kaggle.com/datasets/dhoogla/cicids2017
 **Download CIC-IDS-2017:** https://www.kaggle.com/datasets/chethuhn/network-intrusion-dataset
 
-> **IP / Port metadata:** CICFlowMeter flow-stat files do **not** include source/
-> destination IPs or ports. The dashboard displays `N/A` for these fields — this is
-> correct behaviour, not a bug. Use raw PCAP exports if you need endpoint metadata.
+> **IP / Port metadata:** Some prepared CICFlowMeter flow-stat files do not include source/destination IPs or ports. The dashboard displays `N/A` for missing fields. Use raw PCAP-derived exports if endpoint metadata is required.
+
+### NSL-KDD Benchmark
+
+NSL-KDD is supported as a **batch-only benchmark profile**:
+
+- Accepted format: CSV with NSL-KDD headers.
+- Uses `app/core/nsl_kdd_preprocessor.py`.
+- Stores its own models under `app/artefacts/nsl_kdd/`.
+- Cannot be used for live capture because NSL-KDD does not share the CICFlowMeter feature schema.
+
+### Artifact Layout
+
+```text
+app/artefacts/
+  ais_detect.db
+  runtime_settings.json
+  cicids2017/
+    nsa_model.pkl
+    iso_model.pkl
+    preprocessor.pkl
+    self_boundary.pkl
+    pca_self_boundary.pkl
+    last_train_result.json
+  nsl_kdd/
+    nsa_model.pkl
+    iso_model.pkl
+    preprocessor.pkl
+    self_boundary.pkl
+    pca_self_boundary.pkl
+    last_train_result.json
+```
 
 ---
 
@@ -266,7 +321,8 @@ The May 6 update addresses the original critical demo-auth findings:
 
 Remaining deployment hardening before public production use:
 
-- Move `SECRET_KEY` and environment-specific settings out of source code.
+- Set `AIS_SECRET_KEY`; otherwise the app uses a local-development fallback secret and logs a warning.
+- Set `AIS_ADMIN_PASSWORD` and `AIS_ANALYST_PASSWORD` before public deployment.
 - Add role-specific authorization for destructive admin actions.
 - Restrict CORS origins for deployed environments.
 - Replace SQLite with a managed database for multi-user/cloud deployment.

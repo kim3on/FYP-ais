@@ -1,9 +1,8 @@
 """
-Live Packet Capture & CIC-IDS-2017 Feature Extractor
+Legacy Live Packet Capture & CIC-IDS-2017 Feature Extractor
 ======================================================
-Captures live network traffic, aggregates packets into flows,
-computes the same 77 CIC-IDS-2017 features that the model was
-trained on, then feeds each completed flow to the AIS detector.
+Archived custom Scapy prototype. This file is not imported by the FastAPI app.
+The runtime capture path now uses app.core.cicflow_bridge.
 
 Requirements
 ------------
@@ -24,7 +23,7 @@ How it works
       - The flow has accumulated MAX_FLOW_PACKETS packets.
 4.  FlowFeatureExtractor computes all 77 CIC-IDS-2017 features
     from the raw packet list.
-5.  The scored result is pushed to a callback (→ WebSocket).
+5.  The scored result is pushed to a callback (-> WebSocket).
 
 Feature alignment
 -----------------
@@ -43,14 +42,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── Flow settings ─────────────────────────────────────────────────────
-FLOW_TIMEOUT       = 30       # seconds of inactivity before flow is closed
-MAX_FLOW_PACKETS   = 1000     # force-close after this many packets
-MIN_FLOW_PACKETS   = 2        # discard single-packet flows (not enough data)
-CAPTURE_INTERFACE  = None     # None = default/all interfaces
-CAPTURE_FILTER     = "ip"     # BPF filter — capture only IP packets
+# -- Flow settings -----------------------------------------------------
+FLOW_TIMEOUT      = 30    # seconds of inactivity before flow is closed
+MAX_FLOW_PACKETS  = 1000  # force-close after this many packets
+MIN_FLOW_PACKETS  = 2     # discard single-packet flows (not enough data)
+CAPTURE_INTERFACE = None  # None = default/all interfaces
+CAPTURE_FILTER    = "ip"  # BPF filter -- capture only IP packets
 
-# ── TCP flag bitmasks ──────────────────────────────────────────────────
+# -- TCP flag bitmasks -------------------------------------------------
 _F = {'FIN': 0x01, 'SYN': 0x02, 'RST': 0x04,
       'PSH': 0x08, 'ACK': 0x10, 'URG': 0x20,
       'ECE': 0x40, 'CWE': 0x80}
@@ -108,9 +107,9 @@ class Flow:
         )
 
 
-# ════════════════════════════════════════════════════════════
+# ============================================================
 #  FEATURE EXTRACTOR
-# ════════════════════════════════════════════════════════════
+# ============================================================
 
 class FlowFeatureExtractor:
     """
@@ -129,9 +128,9 @@ class FlowFeatureExtractor:
         dur = max((flow.last_time - flow.start_time) * 1_000_000, 1)  # microseconds
 
         # Packet lengths
-        all_lens = [p.length     for p in pkts]
-        fwd_lens = [p.length     for p in fwd]
-        bwd_lens = [p.length     for p in bwd]
+        all_lens = [p.length      for p in pkts]
+        fwd_lens = [p.length      for p in fwd]
+        bwd_lens = [p.length      for p in bwd]
         fwd_pay  = [p.payload_len for p in fwd]
         bwd_pay  = [p.payload_len for p in bwd]
 
@@ -155,8 +154,8 @@ class FlowFeatureExtractor:
         idl = flow.idle_periods   or [0.0]
 
         # Init window sizes
-        fwd_init_win = fwd[0].win_size  if fwd else -1
-        bwd_init_win = bwd[0].win_size  if bwd else -1
+        fwd_init_win = fwd[0].win_size if fwd else -1
+        bwd_init_win = bwd[0].win_size if bwd else -1
 
         def _mean(lst): return statistics.mean(lst) if lst else 0.0
         def _std(lst):  return statistics.stdev(lst) if len(lst) > 1 else 0.0
@@ -168,14 +167,14 @@ class FlowFeatureExtractor:
         n_bwd = len(bwd)
         n_all = len(pkts)
 
-        flow_bytes_s   = (_sum(all_lens) / dur * 1e6) if dur > 0 else 0
-        flow_pkts_s    = (n_all / dur * 1e6)          if dur > 0 else 0
-        fwd_pkts_s     = (n_fwd / dur * 1e6)          if dur > 0 else 0
-        bwd_pkts_s     = (n_bwd / dur * 1e6)          if dur > 0 else 0
-        down_up_ratio  = (n_bwd / n_fwd)              if n_fwd > 0 else 0
+        flow_bytes_s  = (_sum(all_lens) / dur * 1e6) if dur > 0 else 0
+        flow_pkts_s   = (n_all / dur * 1e6)          if dur > 0 else 0
+        fwd_pkts_s    = (n_fwd / dur * 1e6)          if dur > 0 else 0
+        bwd_pkts_s    = (n_bwd / dur * 1e6)          if dur > 0 else 0
+        down_up_ratio = (n_bwd / n_fwd)              if n_fwd > 0 else 0
 
-        fwd_hdr_len  = _sum(p.header_len for p in fwd)
-        bwd_hdr_len  = _sum(p.header_len for p in bwd)
+        fwd_hdr_len = _sum(p.header_len for p in fwd)
+        bwd_hdr_len = _sum(p.header_len for p in bwd)
 
         return {
             'Destination Port':            flow.dst_port,
@@ -264,26 +263,36 @@ class FlowFeatureExtractor:
         }
 
 
-# ════════════════════════════════════════════════════════════
+# ============================================================
 #  FLOW AGGREGATOR
-# ════════════════════════════════════════════════════════════
+# ============================================================
 
 class FlowAggregator:
     """
     Receives individual packet metadata and groups them into flows.
     Calls on_flow_complete(features_dict) when a flow finishes.
     Thread-safe via a lock.
+
+    IMPORTANT: self._lock must NEVER be held when _complete() is called.
+    The callback fires a DB write + WebSocket broadcast which can block
+    for ~50 ms. Holding the lock during that would freeze the entire
+    aggregator and cause flows to queue up silently until stop(flush=True)
+    releases them all at once.
     """
 
     def __init__(self, on_flow_complete: Callable[[dict], None]):
-        self._flows:    dict[tuple, Flow] = {}
-        self._lock      = threading.Lock()
-        self._extractor = FlowFeatureExtractor()
+        self._flows:      dict[tuple, Flow] = {}
+        self._lock        = threading.Lock()
+        self._extractor   = FlowFeatureExtractor()
         self._on_complete = on_flow_complete
-        self._stop_event = threading.Event()
-        self._reaper    = threading.Thread(target=self._reap_loop,
-                                           daemon=True, name='flow-reaper')
+        self._stop_event  = threading.Event()
+        self._reaper      = threading.Thread(target=self._reap_loop,
+                                             daemon=True, name='flow-reaper')
         self._reaper.start()
+
+    # ------------------------------------------------------------------
+    #  Public
+    # ------------------------------------------------------------------
 
     def ingest(self, raw_pkt):
         """
@@ -303,9 +312,8 @@ class FlowAggregator:
 
         fid, rec, src_ip, dst_ip, sport, dport, proto = pkt_data
 
+        flow_to_complete = None
         with self._lock:
-            # Canonical flow id: always (lower_ip, higher_ip, ...) so that
-            # fwd and bwd packets share the same flow entry
             rev_fid = (dst_ip, src_ip, dport, sport, proto)
 
             if fid in self._flows:
@@ -323,9 +331,41 @@ class FlowAggregator:
 
             fl.add(rec)
 
-            # Complete on TCP FIN/RST
+            # On TCP FIN/RST: remove from dict under the lock, then
+            # fire the callback OUTSIDE the lock (see comment above).
             if proto == 6 and (rec.tcp_flags & (_F['FIN'] | _F['RST'])):
-                self._complete(fl)
+                self._remove_flow(fl)
+                flow_to_complete = fl
+
+        # Lock is released here before the callback fires.
+        if flow_to_complete is not None:
+            self._complete(flow_to_complete)
+
+    def flush_all(self):
+        """Force-complete all open flows. Call on shutdown."""
+        # Snapshot and clear under lock, then fire callbacks outside.
+        with self._lock:
+            flows_to_flush = list(self._flows.values())
+            self._flows.clear()
+        for fl in flows_to_flush:
+            self._complete(fl)
+
+    def discard_all(self):
+        """Drop open flows without scoring them."""
+        with self._lock:
+            self._flows.clear()
+
+    def stop(self, flush: bool = False):
+        """Stop background expiry and either flush or discard open flows."""
+        self._stop_event.set()
+        if flush:
+            self.flush_all()
+        else:
+            self.discard_all()
+
+    # ------------------------------------------------------------------
+    #  Private
+    # ------------------------------------------------------------------
 
     def _parse(self, raw_pkt) -> Optional[tuple]:
         """Extract fields from a Scapy IP packet. Returns None if not IP."""
@@ -342,24 +382,24 @@ class FlowAggregator:
         proto  = ip.proto
         ip_hdr = ip.ihl * 4
 
-        tcp_flags = 0
-        win_size  = 0
-        urgent    = 0
-        sport     = 0
-        dport     = 0
+        tcp_flags     = 0
+        win_size      = 0
+        urgent        = 0
+        sport         = 0
+        dport         = 0
         transport_hdr = 0
 
         if raw_pkt.haslayer(TCP):
             tcp = raw_pkt[TCP]
-            sport      = tcp.sport
-            dport      = tcp.dport
-            tcp_flags  = int(tcp.flags)
-            win_size   = tcp.window
-            urgent     = tcp.urgptr
+            sport         = tcp.sport
+            dport         = tcp.dport
+            tcp_flags     = int(tcp.flags)
+            win_size      = tcp.window
+            urgent        = tcp.urgptr
             transport_hdr = tcp.dataofs * 4 if tcp.dataofs else 20
         elif raw_pkt.haslayer(UDP):
             from scapy.layers.inet import UDP as SCAPY_UDP
-            udp = raw_pkt[SCAPY_UDP]
+            udp   = raw_pkt[SCAPY_UDP]
             sport = udp.sport
             dport = udp.dport
             transport_hdr = 8
@@ -382,13 +422,20 @@ class FlowAggregator:
         )
         return fid, rec, src_ip, dst_ip, sport, dport, proto
 
-    def _complete(self, flow: Flow):
-        """Extract features and fire callback. Must be called under lock."""
-        key = flow.flow_id
-        self._flows.pop(key, None)
+    def _remove_flow(self, flow: Flow):
+        """
+        Remove a flow entry (and its reverse) from self._flows.
+        Must be called while holding self._lock.
+        """
+        self._flows.pop(flow.flow_id, None)
         rev = (flow.dst_ip, flow.src_ip, flow.dst_port, flow.src_port, flow.proto)
         self._flows.pop(rev, None)
 
+    def _complete(self, flow: Flow):
+        """
+        Extract features and fire the on_flow_complete callback.
+        Must be called WITHOUT holding self._lock.
+        """
         if len(flow.packets) < MIN_FLOW_PACKETS:
             return
 
@@ -403,37 +450,25 @@ class FlowAggregator:
         """Background thread: expire idle / oversized flows every 5 s."""
         while not self._stop_event.wait(5):
             now = time.time()
+            # Collect expired flows under the lock, then release the lock
+            # before firing callbacks (DB writes must not block the aggregator).
+            expired_flows = []
             with self._lock:
-                expired = [fid for fid, fl in self._flows.items()
-                           if fl.is_expired(now)]
-                for fid in expired:
+                expired_keys = [fid for fid, fl in self._flows.items()
+                                if fl.is_expired(now)]
+                for fid in expired_keys:
                     fl = self._flows.get(fid)
                     if fl:
-                        self._complete(fl)
-
-    def flush_all(self):
-        """Force-complete all open flows. Call on shutdown."""
-        with self._lock:
-            for fl in list(self._flows.values()):
+                        self._remove_flow(fl)
+                        expired_flows.append(fl)
+            # Lock released -- now safe to call DB + WebSocket callback.
+            for fl in expired_flows:
                 self._complete(fl)
 
-    def discard_all(self):
-        """Drop open flows without scoring them."""
-        with self._lock:
-            self._flows.clear()
 
-    def stop(self, flush: bool = False):
-        """Stop background expiry and either flush or discard open flows."""
-        self._stop_event.set()
-        if flush:
-            self.flush_all()
-        else:
-            self.discard_all()
-
-
-# ════════════════════════════════════════════════════════════
+# ============================================================
 #  PACKET SNIFFER
-# ════════════════════════════════════════════════════════════
+# ============================================================
 
 class PacketSniffer:
     """
@@ -456,27 +491,29 @@ class PacketSniffer:
         on_flow_complete: Callable[[dict], None],
         interface: Optional[str] = None,
         bpf_filter: str = CAPTURE_FILTER,
+        feature_columns: Optional[list] = None,
     ):
-        self._interface   = interface
-        self._filter      = bpf_filter
-        self._aggregator  = FlowAggregator(on_flow_complete)
+        self._interface  = interface
+        self._filter     = bpf_filter
+        self._aggregator = FlowAggregator(on_flow_complete)
         self._thread: Optional[threading.Thread] = None
-        self._running     = False
-        self._stop_event  = threading.Event()
+        self._running    = False
+        self._stop_event = threading.Event()
 
         # Stats
-        self.packets_captured = 0
-        self.flows_completed  = 0
+        self.packets_captured    = 0
+        self.flows_completed     = 0
         self.error: Optional[str] = None
         self.resolved_interface: Optional[str] = None
+        self.capture_engine      = "legacy_scapy"
 
     def start(self):
         if self._running:
             return
         self._running = True
-        self.error = None
+        self.error    = None
         self._stop_event.clear()
-        self._thread = threading.Thread(
+        self._thread  = threading.Thread(
             target=self._sniff_loop, daemon=True, name='pkt-sniffer'
         )
         self._thread.start()
@@ -495,7 +532,7 @@ class PacketSniffer:
 
     def _resolve_interface(self) -> Any:
         """
-        Resolve Windows-friendly adapter names (for example, "Wi-Fi") to the
+        Resolve Windows-friendly adapter names (e.g. "Wi-Fi") to the
         Scapy/Npcap interface object. Non-Windows platforms use the given name.
         """
         if not self._interface:
@@ -506,13 +543,13 @@ class PacketSniffer:
             self.resolved_interface = self._interface
             return self._interface
 
-        target = str(self._interface).strip()
+        target    = str(self._interface).strip()
         target_cf = target.casefold()
 
         try:
             from scapy.all import conf
-
             interfaces = list(conf.ifaces.values())
+
             for iface in interfaces:
                 candidates = [
                     getattr(iface, "name", ""),
@@ -521,7 +558,7 @@ class PacketSniffer:
                     getattr(iface, "guid", ""),
                     str(iface),
                 ]
-                if any(str(value).casefold() == target_cf for value in candidates if value):
+                if any(str(v).casefold() == target_cf for v in candidates if v):
                     self.resolved_interface = getattr(iface, "name", target)
                     return iface
 
@@ -532,7 +569,7 @@ class PacketSniffer:
                     getattr(iface, "network_name", ""),
                     str(iface),
                 ]
-                if any(target_cf in str(value).casefold() for value in candidates if value):
+                if any(target_cf in str(v).casefold() for v in candidates if v):
                     self.resolved_interface = getattr(iface, "name", target)
                     return iface
         except Exception as e:
@@ -561,10 +598,7 @@ class PacketSniffer:
                 stop_filter=lambda _: self._stop_event.is_set(),
             )
         except ImportError:
-            logger.error(
-                "Scapy is not installed. "
-                "Run:  pip install scapy"
-            )
+            logger.error("Scapy is not installed. Run:  pip install scapy")
             self.error = "Scapy is not installed. Run: pip install scapy"
             self._aggregator.stop(flush=False)
             self._running = False
@@ -587,24 +621,24 @@ class PacketSniffer:
         return self._running
 
 
-# ════════════════════════════════════════════════════════════
+# ============================================================
 #  DEMO: run standalone to test capture without FastAPI
-# ════════════════════════════════════════════════════════════
+# ============================================================
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(message)s')
 
-    print("AIS-Detect — Live Packet Capture Demo")
+    print("AIS-Detect -- Live Packet Capture Demo")
     print("Press Ctrl+C to stop\n")
 
     def on_flow(feats):
-        src = feats.get('_src_ip', '?')
-        dst = feats.get('_dst_ip', '?')
-        dur = feats.get('Flow Duration', 0)
+        src  = feats.get('_src_ip', '?')
+        dst  = feats.get('_dst_ip', '?')
+        dur  = feats.get('Flow Duration', 0)
         pkts = feats.get('Total Fwd Packets', 0) + feats.get('Total Backward Packets', 0)
-        bps = feats.get('Flow Bytes/s', 0)
-        print(f"  Flow: {src}:{feats.get('_src_port','?')} → "
+        bps  = feats.get('Flow Bytes/s', 0)
+        print(f"  Flow: {src}:{feats.get('_src_port','?')} -> "
               f"{dst}:{feats.get('_dst_port','?')} | "
               f"pkts={pkts} dur={dur/1e6:.3f}s bps={bps:.0f}")
 

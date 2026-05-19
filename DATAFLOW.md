@@ -4,6 +4,7 @@
 > Backend: FastAPI, Python, SQLite, Scapy  
 > Frontend: React + Vite  
 > Main dataset: CICIDS2017 flow records  
+> Batch benchmark dataset: NSL-KDD  
 > Main model: Artificial Immune System using Negative Selection Algorithm / V-Detector NSA  
 > Baseline model: Isolation Forest  
 
@@ -35,6 +36,13 @@ Normal vs Anomaly
 ```
 
 Attack family guessing is a second layer for display only. It does not decide whether a row is anomalous.
+
+Dataset profiles are separated so incompatible feature schemas are not mixed:
+
+| Profile | Use | Live capture | Artifact folder |
+|---|---|---|---|
+| `cicids2017` | Main CICFlowMeter-style IDS workflow | Yes | `app/artefacts/cicids2017/` |
+| `nsl_kdd` | Offline batch benchmark | No | `app/artefacts/nsl_kdd/` |
 
 ---
 
@@ -102,7 +110,7 @@ The backend:
 ### 4.2 Benign-Only Split
 
 ```text
-Uploaded CICIDS2017 file
+Uploaded dataset file
     |
     v
 Load CSV / Parquet
@@ -116,7 +124,12 @@ Map Label:
     non-BENIGN -> attack label for reporting only
     |
     v
-Keep only BENIGN rows for fitting and calibration
+Select dataset profile:
+    cicids2017 -> CICIDSPreprocessor
+    nsl_kdd    -> NSLKDDPreprocessor
+    |
+    v
+Keep only BENIGN/normal rows for fitting and calibration
     |
     v
 Split BENIGN rows:
@@ -129,7 +142,10 @@ Attack rows are not used for model fitting or threshold selection. If the upload
 
 ### 4.3 Preprocessing
 
-File: `app/core/preprocessor.py`
+Files:
+
+- `app/core/preprocessor.py` for CICIDS2017.
+- `app/core/nsl_kdd_preprocessor.py` for NSL-KDD.
 
 ```text
 BENIGN train rows
@@ -206,13 +222,18 @@ These are continuous scores. They are not final labels by themselves.
 
 File: `app/models/self_boundary.py`
 
-Self-boundary is a benign-only feature boundary check in the original raw feature space.
+AIS-Detect now trains two benign-only Self-Boundary models:
+
+| Model | Space | Purpose |
+|---|---|---|
+| Raw Self-Boundary | Cleaned raw feature space | Human-readable feature evidence |
+| PCA Self-Boundary | PCA-whitened feature space | Final fused AIS anomaly scoring |
 
 ```text
 BENIGN train rows in raw feature space
     |
     v
-Learn robust per-feature center/spread
+Learn empirical quantile fences per feature
     |
     v
 Measure how often benign rows violate each feature boundary
@@ -221,21 +242,29 @@ Measure how often benign rows violate each feature boundary
 Give rarer benign violations higher weight
     |
     v
-Produce continuous weighted violation score
+Produce continuous weighted violation score for evidence
+
+BENIGN train rows in PCA space
+    |
+    v
+Learn empirical quantile fences per PCA component
+    |
+    v
+Produce PCA-space Self-Boundary score for fusion
 ```
 
 This is used as an AIS autoimmunity check: the model should not react too often to benign/self traffic.
 
 ### 4.6 Benign-Calibrated Score Fusion
 
-The final AIS anomaly score is a weighted fusion of NSA and self-boundary scores.
+The final AIS anomaly score is a weighted fusion of NSA and PCA Self-Boundary scores.
 
 ```text
 BENIGN calibration rows
     |
     v
 NSA component scores
-    + self-boundary weighted score
+    + PCA self-boundary weighted score
     |
     v
 Scale each component using BENIGN calibration quantiles only
@@ -257,7 +286,7 @@ fused_score =
     weighted NSA distance score
   + weighted NSA density score
   + weighted NSA detector-depth score
-  + weighted self-boundary score
+  + weighted PCA self-boundary score
 ```
 
 The saved threshold is unsupervised because it is selected only from BENIGN calibration scores.
@@ -268,11 +297,12 @@ Training saves:
 
 | Artefact | Purpose |
 |---|---|
-| `app/artefacts/nsa_model.pkl` | NSA detectors, self-reference set, fusion calibration |
-| `app/artefacts/self_boundary.pkl` | Raw feature boundary statistics and weighted score calibration |
-| `app/artefacts/iso_model.pkl` | Isolation Forest baseline |
-| `app/artefacts/preprocessor.pkl` | RobustScaler, PCA, feature schema |
-| `app/artefacts/last_train_result.json` | Dashboard training summary |
+| `app/artefacts/<dataset>/nsa_model.pkl` | NSA detectors, self-reference set, fusion calibration |
+| `app/artefacts/<dataset>/self_boundary.pkl` | Raw feature boundary statistics and weighted evidence calibration |
+| `app/artefacts/<dataset>/pca_self_boundary.pkl` | PCA-space Self-Boundary model used for fused scoring |
+| `app/artefacts/<dataset>/iso_model.pkl` | Isolation Forest baseline |
+| `app/artefacts/<dataset>/preprocessor.pkl` | RobustScaler, PCA, feature schema |
+| `app/artefacts/<dataset>/last_train_result.json` | Dashboard training summary |
 
 Training result JSON includes:
 
@@ -304,13 +334,16 @@ Browser
 Uploaded detection file
     |
     v
-Load saved preprocessor, NSA, self-boundary, optional IsoForest
+Load saved preprocessor, NSA, raw Self-Boundary, PCA Self-Boundary, optional IsoForest
     |
     v
 Transform rows using fitted RobustScaler + PCA
     |
     v
 Calculate self-boundary weighted scores from raw features
+    |
+    v
+Calculate PCA self-boundary weighted scores from PCA features
     |
     v
 Calculate NSA component scores from PCA features
@@ -337,7 +370,8 @@ It uses:
 
 - NSA V-detector evidence in PCA space.
 - NSA self-gap/density evidence in PCA space.
-- Self-boundary weighted violation evidence in raw feature space.
+- PCA Self-Boundary weighted violation evidence for scoring.
+- Raw Self-Boundary evidence for explanation.
 - Saved fusion threshold from benign calibration.
 
 ### 5.2 Layer 2: Attack Family Guessing
@@ -477,13 +511,14 @@ Important fields:
 | `detect_logs` | Detection log lines streamed to frontend |
 | `alerts` | In-memory alert list |
 | `active_model` | Current model selection |
+| `active_dataset_type` | Current dataset profile, such as `cicids2017` or `nsl_kdd` |
 | `capture_active` | Whether live capture is running |
 | `chart_normal` | Live traffic normal-flow ring buffer |
 | `chart_anomaly` | Live traffic anomaly-flow ring buffer |
 | `last_train_result` | Last training output |
 | `last_detect_result` | Last detection output |
 
-SQLite remains the persistent store for users, alerts, blocked IPs, and raw flows.
+SQLite remains the persistent store for users, alerts, blocked IPs, and raw flows. Runtime settings persist the active model and active dataset profile in `app/artefacts/runtime_settings.json`.
 
 ---
 
@@ -531,11 +566,17 @@ FastAPI Backend
     |       +-- CICIDSPreprocessor
     |       |       fit RobustScaler + PCA on BENIGN train only
     |       |
+    |       +-- NSLKDDPreprocessor
+    |       |       batch-only benchmark preprocessing when dataset_type=nsl_kdd
+    |       |
     |       +-- NegativeSelectionDetector
     |       |       generate V-detectors in PCA space
     |       |
     |       +-- SelfBoundaryDetector
-    |       |       learn raw-feature benign boundary
+    |       |       learn raw-feature evidence boundary
+    |       |
+    |       +-- PCA SelfBoundaryDetector
+    |       |       learn PCA-space boundary for fused scoring
     |       |
     |       +-- Score fusion calibration
     |               calibrate threshold on BENIGN calibration only
@@ -547,7 +588,8 @@ FastAPI Backend
     |       |
     |       +-- transform with saved scaler/PCA
     |       +-- compute NSA component scores
-    |       +-- compute self-boundary weighted score
+    |       +-- compute PCA self-boundary weighted score
+    |       +-- attach raw self-boundary evidence
     |       +-- apply saved fused threshold
     |       +-- optionally compute post-run labelled verification
     |
@@ -563,13 +605,15 @@ FastAPI Backend
 
 | Decision | Reason |
 |---|---|
-| CICIDS2017 instead of NSL-KDD | CICIDS2017 is newer, flow-based, and closer to live traffic monitoring |
+| CICIDS2017 as the live profile | CICIDS2017 is flow-based and matches live CICFlowMeter-style feature extraction |
+| NSL-KDD as batch-only benchmark | NSL-KDD is useful academically but has a different schema, so it cannot drive live capture |
 | Split before fitting | Prevents preprocessing leakage |
 | BENIGN-only fitting | Keeps the AIS training unsupervised and biologically consistent |
 | RobustScaler | Reduces the impact of large CICIDS2017 outliers |
 | PCA whitening | Makes distance-based NSA scoring more stable |
 | NSA in PCA space | Detector distances are measured in the same transformed feature space |
-| Self-boundary in raw feature space | Preserves interpretable feature-boundary evidence |
+| PCA Self-Boundary for scoring | Keeps fused scoring in the same PCA geometry as NSA |
+| Raw Self-Boundary for evidence | Preserves interpretable feature-boundary explanations |
 | Score fusion instead of hard OR | Produces a smoother anomaly score and a controllable FPR |
 | Threshold from benign calibration | Keeps threshold selection unsupervised |
 | Labels only after detection | Allows honest evaluation without supervised leakage |
@@ -589,4 +633,3 @@ Recommended wording:
 > The Self Intrusion Rate measures how often the AIS mechanism reacts to benign/self traffic. It is interpreted as an autoimmunity check: lower values mean the detector repertoire is less likely to attack self traffic.
 
 > The Silhouette Score is included only as an unsupervised separation indicator. It has limitations because anomaly detection is not pure clustering, and the predicted anomaly group may contain multiple attack behaviours.
-
