@@ -15,6 +15,7 @@ alerts      — GET/PATCH /api/alerts/*
 capture     — POST/GET /api/capture/*, WS /ws/live
 dashboard   — GET /api/system/status, /api/dashboard/stats,
               /api/model/summary, PATCH /api/settings, GET /health
+users       — GET/POST/DELETE /api/users/*
 
 Frontend
 --------
@@ -34,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.routers import auth, training, detection, alerts, capture, dashboard, firewall
+from app.routers import auth, training, detection, alerts, capture, dashboard, firewall, users
 from app.routers.auth import ensure_user_profile, get_password_hash
 from app.core.database import engine
 from app.models.db_models import Base, BlockedIPDB, UserDB
@@ -79,6 +80,7 @@ app.include_router(alerts.router)
 app.include_router(capture.router)
 app.include_router(dashboard.router)
 app.include_router(firewall.router)
+app.include_router(users.router)
 
 @app.on_event("startup")
 def on_startup():

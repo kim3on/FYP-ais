@@ -480,7 +480,42 @@ class NegativeSelectionDetector:
     #  DETECTION — True NSA: Detector-primary classification               #
     # ------------------------------------------------------------------ #
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _runtime_threshold_factor(alert_threshold: float | None) -> float:
+        if alert_threshold is None:
+            return 1.0
+        try:
+            return max(float(alert_threshold), 1e-9) / 0.50
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _scaled_threshold(self, threshold: float, alert_threshold: float | None) -> float:
+        return float(threshold) * self._runtime_threshold_factor(alert_threshold)
+
+    def _scaled_threshold_and_scale(
+        self,
+        threshold: float,
+        scale: float | None,
+        alert_threshold: float | None,
+    ) -> tuple[float, float]:
+        factor = self._runtime_threshold_factor(alert_threshold)
+        base_threshold = float(threshold)
+        adjusted_threshold = base_threshold * factor
+        base_scale = max(float(scale or base_threshold * 1.5), base_threshold + 1e-9)
+        adjusted_scale = base_scale * factor
+        return adjusted_threshold, max(adjusted_scale, adjusted_threshold + 1e-9)
+
+    def _runtime_detector_matches(
+        self,
+        detector_matches: np.ndarray,
+        detector_scores: np.ndarray,
+        alert_threshold: float | None,
+    ) -> np.ndarray:
+        if alert_threshold is None:
+            return detector_matches.astype(bool)
+        return detector_matches.astype(bool) & (detector_scores >= float(alert_threshold))
+
+    def predict(self, X: np.ndarray, alert_threshold: float | None = None) -> np.ndarray:
         """
         Classify samples as normal (0) or anomalous (1).
 
@@ -499,10 +534,16 @@ class NegativeSelectionDetector:
         self._check_fitted()
         scores = self.anomaly_scores(X)
         threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
-        detector_matches, _ = self._check_detector_match(X, update_aging=False)
+        threshold = self._scaled_threshold(threshold, alert_threshold)
+        detector_matches, detector_scores = self._check_detector_match(X, update_aging=False)
+        detector_matches = self._runtime_detector_matches(detector_matches, detector_scores, alert_threshold)
         return ((scores > threshold) | detector_matches).astype(int)
 
-    def predict_with_scores(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def predict_with_scores(
+        self,
+        X: np.ndarray,
+        alert_threshold: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns (labels, confidence_scores ∈ [0, 1]).
 
@@ -516,22 +557,28 @@ class NegativeSelectionDetector:
         self._check_fitted()
         raw_scores = self.anomaly_scores(X)
         threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
+        threshold, scale = self._scaled_threshold_and_scale(
+            threshold,
+            self.score_scale_,
+            alert_threshold,
+        )
         detector_matches, detector_scores = self._check_detector_match(X, update_aging=False)
+        detector_matches = self._runtime_detector_matches(detector_matches, detector_scores, alert_threshold)
         labels = ((raw_scores > threshold) | detector_matches).astype(int)
-        scale = max(float(self.score_scale_ or threshold * 1.5), threshold + 1e-9)
         confidence = np.clip((raw_scores - threshold) / max(scale - threshold, 1e-9), 0.0, 1.0)
+        detector_scores = np.where(detector_matches, detector_scores, 0.0)
         confidence = np.maximum(confidence, detector_scores)
         confidence = np.where(labels == 1, confidence, 0.0)
         return labels, confidence.round(4)
 
     def predict_with_details(
-        self, X: np.ndarray
+        self, X: np.ndarray, alert_threshold: float | None = None
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Returns (labels, confidence_scores, dist_to_self).
         """
         self._check_fitted()
-        labels, scores = self.predict_with_scores(X)
+        labels, scores = self.predict_with_scores(X, alert_threshold=alert_threshold)
         dist_to_self = self._min_dist_to_self(X)
         return labels, scores, dist_to_self
 
@@ -539,6 +586,7 @@ class NegativeSelectionDetector:
         self,
         X: np.ndarray,
         self_boundary_scores: np.ndarray | None = None,
+        alert_threshold: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return labels, normalized confidence, and fused raw scores."""
         self._check_fitted()
@@ -547,9 +595,15 @@ class NegativeSelectionDetector:
         threshold = getattr(self, "fusion_threshold_", None)
         if threshold is None:
             threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
+        threshold, scale = self._scaled_threshold_and_scale(
+            threshold,
+            self.fusion_score_scale_,
+            alert_threshold,
+        )
+        detector_matches = self._runtime_detector_matches(detector_matches, detector_scores, alert_threshold)
         labels = ((raw_scores > threshold) | detector_matches).astype(int)
-        scale = max(float(self.fusion_score_scale_ or threshold * 1.5), threshold + 1e-9)
         confidence = np.clip((raw_scores - threshold) / max(scale - threshold, 1e-9), 0.0, 1.0)
+        detector_scores = np.where(detector_matches, detector_scores, 0.0)
         confidence = np.maximum(confidence, detector_scores)
         confidence = np.where(labels == 1, confidence, 0.0)
         return labels, confidence.round(4), raw_scores.astype(np.float64)
@@ -558,6 +612,7 @@ class NegativeSelectionDetector:
         self,
         X: np.ndarray,
         self_boundary_scores: np.ndarray | None = None,
+        alert_threshold: float | None = None,
     ) -> dict[str, np.ndarray]:
         """
         Return source-level decision components without changing predictions.
@@ -569,17 +624,22 @@ class NegativeSelectionDetector:
         """
         self._check_fitted()
         detector_matches, detector_scores = self._check_detector_match(X, update_aging=False)
+        detector_matches = self._runtime_detector_matches(detector_matches, detector_scores, alert_threshold)
+        runtime_detector_scores = np.where(detector_matches, detector_scores, 0.0)
         distances = self._min_dist_to_self(X)
         nsa_scores = distances + np.where(
-            detector_scores >= getattr(self, "confidence_threshold", 0.0),
-            detector_scores,
+            runtime_detector_scores >= getattr(self, "confidence_threshold", 0.0),
+            runtime_detector_scores,
             0.0,
         )
         nsa_threshold = self.score_threshold_ if self.score_threshold_ is not None else self.r
+        nsa_threshold = self._scaled_threshold(nsa_threshold, alert_threshold)
         fused_scores = self.fused_scores(X, self_boundary_scores=self_boundary_scores)
         fusion_threshold = getattr(self, "fusion_threshold_", None)
         if fusion_threshold is None:
             fusion_threshold = nsa_threshold
+        else:
+            fusion_threshold = self._scaled_threshold(fusion_threshold, alert_threshold)
 
         return {
             "v_detector_match": detector_matches.astype(bool),

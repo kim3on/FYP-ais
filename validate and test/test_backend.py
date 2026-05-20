@@ -1116,6 +1116,99 @@ test("CICFlow mode — CIC-compatible emits terminal TCP flows",  test_cicflow_m
 
 
 # ════════════════════════════════════════════════════════════
+print("\n── 9. Runtime Settings ────────────────────────────────────────")
+# ════════════════════════════════════════════════════════════
+
+def test_settings_update_persists_thresholds_without_real_artifact_write():
+    import asyncio
+    import json
+    import tempfile
+    from pathlib import Path
+    from fastapi import HTTPException
+    import app.state as state_module
+    from app.routers.dashboard import system_status, update_settings
+    from app.schemas import SettingsUpdate
+
+    old_path = state_module.SETTINGS_PATH
+    old_threshold = state_module._state.get("threshold")
+    old_zero_day = state_module._state.get("zero_day_threshold")
+    old_model = state_module._state.get("active_model")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        state_module.SETTINGS_PATH = Path(tmp) / "runtime_settings.json"
+        try:
+            result = asyncio.run(update_settings(
+                SettingsUpdate(threshold=0.35, zero_day_threshold=0.75),
+                user=object(),
+            ))
+            assert result["threshold"] == 0.35
+            assert result["zero_day_threshold"] == 0.75
+
+            status = asyncio.run(system_status(user=object()))
+            assert status["threshold"] == 0.35
+            assert status["zero_day_threshold"] == 0.75
+
+            saved = json.loads(state_module.SETTINGS_PATH.read_text(encoding="utf-8"))
+            assert saved["threshold"] == 0.35
+            assert saved["zero_day_threshold"] == 0.75
+
+            try:
+                asyncio.run(update_settings(SettingsUpdate(threshold=0.99), user=object()))
+            except HTTPException as exc:
+                assert exc.status_code == 400
+            else:
+                raise AssertionError("Invalid threshold should be rejected")
+        finally:
+            state_module.SETTINGS_PATH = old_path
+            state_module._state["threshold"] = old_threshold
+            state_module._state["zero_day_threshold"] = old_zero_day
+            state_module._state["active_model"] = old_model
+
+def test_nsa_runtime_threshold_gates_detector_match_alerts():
+    from app.models.nsa import NegativeSelectionDetector
+
+    nsa = NegativeSelectionDetector()
+    nsa.is_fitted_ = True
+    nsa.score_threshold_ = 0.50
+    nsa.score_scale_ = 1.0
+    nsa.r = 0.50
+    nsa.anomaly_scores = lambda X: np.array([0.10])
+    nsa._check_detector_match = lambda X, update_aging=False: (
+        np.array([True]),
+        np.array([0.40]),
+    )
+
+    X = np.zeros((1, 1), dtype=np.float32)
+    assert int(nsa.predict(X, alert_threshold=0.50)[0]) == 0
+    assert int(nsa.predict(X, alert_threshold=0.35)[0]) == 1
+
+def test_zero_day_threshold_is_runtime_configurable():
+    from app.core.detection import DetectionEngine
+
+    class Prep:
+        dataset_type = "cicids2017"
+
+    engine = DetectionEngine(None, Prep(), zero_day_threshold=0.75)
+    neutral_flow = {
+        "Protocol": 6,
+        "Total Fwd Packets": 10,
+        "Total Backward Packets": 10,
+        "Flow Duration": 1_000_000,
+        "Flow Packets/s": 10,
+        "Flow Bytes/s": 10_000,
+        "Fwd Packet Length Mean": 700,
+        "Bwd Packet Length Mean": 700,
+        "Average Packet Size": 700,
+    }
+    assert engine._attribute_attack(neutral_flow, novelty_score=0.70) == "Unknown Anomaly"
+    assert engine._attribute_attack(neutral_flow, novelty_score=0.80) == "Zero-Day Candidate"
+
+test("Settings — thresholds persist and invalid values reject", test_settings_update_persists_thresholds_without_real_artifact_write)
+test("NSA — runtime threshold gates detector matches",          test_nsa_runtime_threshold_gates_detector_match_alerts)
+test("Detection — zero-day threshold is runtime configurable",  test_zero_day_threshold_is_runtime_configurable)
+
+
+# ════════════════════════════════════════════════════════════
 print("\n── SUMMARY ─────────────────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 passed = sum(1 for _, ok, _ in results if ok)

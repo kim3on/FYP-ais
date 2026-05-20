@@ -26,7 +26,7 @@
 ### May 6 Security & ML Update
 - **JWT Authentication:** Replaced demo tokens with signed JWT authentication. Passwords are stored as bcrypt hashes, and non-health API routes now require authenticated access.
 - **Secured WebSocket Access:** Live WebSocket connections now require a valid token instead of exposing alert snapshots publicly.
-- **Analytical Alert Export:** Added a backend-generated alert CSV export with attack families, severity ranks, repeat counts, risk scores, review status, and recommended analyst actions.
+- **Alert Summary Export:** Added a backend-generated alert summary CSV with severity and attack-family rollups, top sources/targets, repeated endpoint pairs, priority incidents, and action-code guidance.
 - **PCA-Safe NSA Geometry:** Updated the preprocessing/model path to use RobustScaler + PCA whitening, dynamic NSA thresholds, and detector generation in the actual PCA feature space instead of assuming `[0, 1]` bounds.
 - **False Positive Rate Visibility:** Exposed FPR in training/detection result views to make model evaluation more useful for FYP analysis.
 
@@ -197,14 +197,14 @@ GET   /api/alerts/{id}         → single alert detail
 PATCH /api/alerts/{id}/fp      → mark as false positive
 DELETE /api/alerts             → clear stored alerts
 
-GET   /api/alerts/export.csv   → analytical CSV export
+GET   /api/alerts/export.csv   → alert summary CSV export
   Query params: from, to, severity, attack_type, include_false_positive, zero_day_only
 ```
 
 The CSV export is generated from the SQLite alert database, not only the visible
-frontend table. It includes derived fields such as `attack_family`,
-`severity_rank`, `risk_score`, repeat counts, `recommended_action`, and
-`analysis_note` for FYP reporting and analyst review.
+frontend table. It is a sectioned triage report with a report overview, severity
+and attack-family summaries, top sources/targets, repeated endpoint pairs,
+priority incidents, and an action legend for FYP reporting and analyst review.
 
 ### Dashboard & Settings
 ```

@@ -1,8 +1,8 @@
-# Alert CSV Analysis Export
+# Alert Summary CSV Export
 
 ## Purpose
 
-The alert CSV export should support FYP evaluation and analyst review. It should not only download the visible alert table. It should export database-backed alert records with derived analysis fields that explain incident context, severity, repetition, zero-day status, and recommended action.
+The alert CSV export is a triage-oriented summary report for FYP evaluation and analyst review. It is intentionally not a raw dump of every alert field. The report groups stored alerts into readable sections so Excel or Google Sheets users can understand the selected alert window quickly.
 
 ## Backend Endpoint
 
@@ -25,39 +25,40 @@ zero_day_only
 
 The export is generated from `AlertDB`, not frontend state or `_state["alerts"]`. This makes the file reproducible, avoids pagination gaps, and keeps the export consistent with backend filtering and authentication.
 
-## CSV Columns
-
-The export contains these columns:
+The endpoint path remains unchanged for compatibility, but the downloaded filename now uses:
 
 ```text
-exported_at
-analysis_window_start
-analysis_window_end
-alert_id
-timestamp
-date
-hour
-attack_type
-attack_family
-severity
-severity_rank
-confidence
-confidence_pct
-risk_score
-src_ip
-dst_ip
-dst_port
-protocol
-endpoint_pair
-is_zero_day
-is_false_positive
-review_status
-repeat_count_src_ip
-repeat_count_dst_ip
-repeat_count_attack_type
-repeat_count_endpoint_pair
-recommended_action
-analysis_note
+alerts_summary_YYYYMMDD_HHMMSS.csv
+```
+
+## CSV Layout
+
+The file is a sectioned CSV. Each section starts with a `# Section Name` row, followed by its own headers and rows.
+
+```text
+# Report Overview
+metric,value
+
+# Severity Summary
+severity,count,percentage
+
+# Attack Family Summary
+attack_family,count,percentage
+
+# Top Sources
+src_ip,alert_count,unique_targets,top_attack_family,max_severity,max_risk_score
+
+# Top Targets
+dst_ip,alert_count,unique_sources,top_attack_family,max_severity,max_risk_score
+
+# Repeated Endpoint Pairs
+src_ip,dst_ip,dst_port,protocol,count,first_seen,last_seen,max_severity,max_risk_score
+
+# Priority Incidents
+priority_rank,alert_id,timestamp,severity,attack_family,attack_type,risk_score,src_ip,dst_ip,dst_port,action_code
+
+# Action Legend
+action_code,explanation
 ```
 
 ## Analysis Rules
@@ -77,15 +78,6 @@ Unknown / Novel
 Unknown
 ```
 
-`severity_rank` gives sortable numerical severity:
-
-```text
-critical = 4
-high     = 3
-medium   = 2
-low      = 1
-```
-
 `risk_score` is capped at `100` and combines:
 
 ```text
@@ -96,17 +88,17 @@ endpoint repetition
 false-positive status
 ```
 
-False positives remain exportable for audit, but their operational `risk_score` is `0`.
+False positives remain counted in overview and rollup sections when included by filter, but their operational `risk_score` is `0` and they are excluded from the Priority Incidents section.
 
-`repeat_count_*` values are calculated inside the selected export window. These fields help identify repeated sources, repeated targets, repeated attack types, and repeated endpoint pairs.
+Repeated endpoint pairs are shown only when the same source, destination, port, and protocol appear at least three times in the selected export window. This helps identify campaign-like repetition without flooding the report.
 
-`recommended_action` gives an analyst-facing action such as immediate investigation, brute-force log review, exposed-service review, DoS rate limiting, web log review, or monitoring.
+Priority incidents are capped to the top 15 non-false-positive alerts, sorted by risk score and newest timestamp.
 
-`analysis_note` gives a short row-level explanation of why the alert matters.
+Text cells are protected against Excel formula injection by escaping values that begin with `=`, `+`, `-`, or `@`.
 
 ## Frontend Behavior
 
-The Alerts page keeps the existing export button, but the button calls the backend export endpoint instead of constructing CSV from visible rows. The active dashboard filter is mapped to backend export filters:
+The Alerts page export button calls the backend export endpoint. The active dashboard filter is mapped to backend export filters:
 
 ```text
 Critical -> severity=critical
@@ -115,19 +107,23 @@ Zero-Day -> zero_day_only=true
 All      -> no severity / zero-day filter
 ```
 
+The button label is `Export Summary` to reflect that the downloaded file is a triage report rather than a full raw alert table.
+
 ## Validation
 
 The export is considered correct when:
 
 ```text
-CSV headers match the documented analytical schema.
-Rows are exported from the database, not only the visible frontend page.
+The file opens cleanly in Excel or Google Sheets.
+The filename starts with alerts_summary_.
+The file contains section headers and per-section columns.
 Severity and zero-day filters affect the exported file.
 Attack families are normalized from detailed attack types.
-Repeat counts are calculated within the export result set.
-Risk scores are between 0 and 100.
-False positives are clearly marked.
-The file opens cleanly in Excel or Google Sheets.
+Top source and target sections are sorted by count and risk.
+Repeated endpoint pairs only include count >= 3.
+Priority incidents contain at most 15 rows.
+Priority incidents exclude false positives.
+Empty result sets still return a Report Overview section with a note.
 Unauthenticated users cannot access the endpoint.
 Administrator and analyst users can export the file.
 ```

@@ -177,6 +177,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     """
     return get_user_from_token(token, db)
 
+async def require_admin_user(user: UserDB = Depends(get_current_user)) -> UserDB:
+    """
+    Dependency that ensures the authenticated user is an administrator.
+    """
+    role = (getattr(user, "role", "") or "").lower()
+    if "administrator" not in role and role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Insufficient permissions. Administrator role required."
+        )
+    return user
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────
 
 @router.post("/login")

@@ -11,15 +11,19 @@ WS   /ws/live                  — WebSocket push for real-time dashboard update
 
 import asyncio
 import datetime
+import tempfile
 import logging
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, Query
+import pandas as pd
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.core.pipeline import models_ready
 from app.core.datasets import DATASET_CICIDS2017
 from app.core.capture_factory import get_packet_sniffer_class
+from app.core.cicflow_bridge import CICFlowMeterAdapter
 from app.state import _state, _build_engine
 from app.core.database import get_db, SessionLocal
 from app.models.db_models import RawFlowDB, AlertDB
@@ -71,9 +75,10 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
         """Called by FlowAggregator each time a flow completes."""
         meta_keys = ['_src_ip', '_dst_ip', '_src_port', '_dst_port', '_protocol']
         meta = {k.lstrip('_'): features.pop(k, '?') for k in meta_keys}
+        flow_features = dict(features)
 
         try:
-            result = engine.detect_sample(features)
+            result = engine.detect_sample(flow_features)
         except Exception as exc:
             _state["sniffer_error"] = f"Detection failed for completed flow: {exc}"
             logger.exception("Detection failed for completed flow; dropping flow.")
@@ -101,7 +106,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
             dst_ip=str(meta.get("dst_ip", "")),
             dst_port=dst_port_int,
             protocol=proto_str,
-            flow_bytes_s=float(features.get("Flow Bytes/s", 0.0) or 0.0)
+            flow_bytes_s=float(flow_features.get("Flow Bytes/s", 0.0) or 0.0)
         )
         db.add(raw_flow)
 
@@ -134,7 +139,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
                     confidence_pct=alert["confidence_pct"],
                     is_false_positive=False,
                     is_zero_day=alert["is_zero_day"],
-                    raw_features=features
+                    raw_features=flow_features
                 )
                 db.add(db_alert)
             _state["alerts"].extend(result["alerts"])
@@ -151,7 +156,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
         finally:
             db.close()
 
-        asyncio.run_coroutine_threadsafe(_broadcast_live_update(result, meta), loop)
+        asyncio.run_coroutine_threadsafe(_broadcast_live_update(result, meta, flow_features), loop)
 
     _state["sniffer_error"] = None
     feature_columns = list(getattr(engine.preprocessor, "feature_columns_", None) or [])
@@ -268,6 +273,80 @@ async def clear_flows(db: Session = Depends(get_db), user=Depends(get_current_us
     return {"message": "Raw flows cleared from persistent database"}
 
 
+@router.post("/api/capture/submit-flow")
+async def submit_flow_file(
+    file: UploadFile = File(...),
+    limit: Optional[int] = 1000,
+    user=Depends(get_current_user),
+):
+    """
+    Submit an offline flow file for immediate scoring.
+
+    CSV/Parquet files are treated as pre-extracted CICIDS-compatible flow rows.
+    PCAP/PCAPNG files are converted through CICFlowMeter before scoring.
+    """
+    if _state.get("active_dataset_type") != DATASET_CICIDS2017:
+        raise HTTPException(
+            status_code=400,
+            detail="Manual flow submission is CICIDS2017-only. Select or train a CICIDS2017 model first.",
+        )
+    if not models_ready(DATASET_CICIDS2017):
+        raise HTTPException(status_code=400, detail="Models not trained yet. Train first, then submit a flow file.")
+
+    filename = file.filename or "submitted-flow"
+    suffix = Path(filename).suffix.lower()
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    engine = _build_engine(DATASET_CICIDS2017)
+    source_bytes = payload
+    detection_filename = filename
+    converted = False
+    converted_flow_count = None
+    flow_preview = []
+
+    if suffix in {".pcap", ".pcapng"}:
+        source_bytes, converted_flow_count, flow_preview = _pcap_to_cicids_csv(
+            payload,
+            suffix=suffix,
+            feature_columns=list(getattr(engine.preprocessor, "feature_columns_", None) or []),
+        )
+        detection_filename = f"{Path(filename).stem}_flows.csv"
+        converted = True
+    elif suffix not in {".csv", ".parquet", ".pq"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Submit a .csv, .parquet, .pq, .pcap, or .pcapng file",
+        )
+
+    try:
+        result = engine.detect_from_csv(
+            source_bytes,
+            limit=int(limit or 0) or None,
+            filename=detection_filename,
+        )
+    except Exception as exc:
+        logger.exception("Manual flow submission failed.")
+        raise HTTPException(status_code=400, detail=f"Flow submission failed: {exc}") from exc
+
+    _state["alerts"].extend(result.get("alerts", []))
+    _state["packet_count"] += int(result.get("total_checked", 0) or 0)
+    _state["anomaly_count"] += int(result.get("anomalies_found", 0) or 0)
+    _state["last_detect_result"] = result
+
+    _persist_manual_submission(result, flow_preview)
+
+    return {
+        "message": "Flow submission analysed",
+        "filename": filename,
+        "converted": converted,
+        "converted_flow_count": converted_flow_count,
+        "flow_preview": flow_preview[:25],
+        "result": result,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  WEBSOCKET — real-time push to frontend
 # ═══════════════════════════════════════════════════════════════════════
@@ -330,11 +409,143 @@ async def websocket_live(ws: WebSocket, token: Optional[str] = Query(None)):
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _broadcast_live_update(result: dict, meta: dict):
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return str(value)
+    return value
+
+
+def _pcap_to_cicids_csv(payload: bytes, suffix: str, feature_columns: list[str]) -> tuple[bytes, int, list[dict]]:
+    """Convert a PCAP/PCAPNG payload to normalized CICIDS-compatible CSV bytes."""
+    try:
+        from cicflowmeter.flow_session import FlowSession
+        from scapy.layers.inet import IP, TCP, UDP
+        from scapy.utils import PcapReader
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="CICFlowMeter/Scapy is not installed; PCAP conversion is unavailable.",
+        ) from exc
+
+    with tempfile.TemporaryDirectory(prefix="ais_pcap_", ignore_cleanup_errors=True) as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        input_path = tmp_path / f"submitted{suffix}"
+        output_path = tmp_path / "flows.csv"
+        input_path.write_bytes(payload)
+
+        try:
+            session = FlowSession(output_mode="csv", output=str(output_path), fields=None, verbose=False)
+            with PcapReader(str(input_path)) as reader:
+                for packet in reader:
+                    if IP in packet and (TCP in packet or UDP in packet):
+                        session.process(packet)
+            session.flush_flows()
+        except Exception as exc:
+            logger.exception("PCAP to flow conversion failed.")
+            raise HTTPException(status_code=400, detail=f"PCAP conversion failed: {exc}") from exc
+
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise HTTPException(status_code=400, detail="PCAP conversion produced no completed TCP/UDP flows")
+
+        raw_df = pd.read_csv(output_path)
+        if raw_df.empty:
+            raise HTTPException(status_code=400, detail="PCAP conversion produced no completed TCP/UDP flows")
+
+        adapter = CICFlowMeterAdapter(lambda _features: None, feature_columns=feature_columns)
+        rows = []
+        for raw in raw_df.to_dict(orient="records"):
+            if adapter._packet_count(raw) < 2:
+                continue
+            row = adapter.normalize(raw)
+            row["Source IP"] = row.get("_src_ip", "")
+            row["Destination IP"] = row.get("_dst_ip", "")
+            row["Source Port"] = row.get("_src_port", "")
+            row["Destination Port"] = row.get("_dst_port", row.get("Destination Port", ""))
+            row["Protocol"] = row.get("_protocol", row.get("Protocol", ""))
+            row["Timestamp"] = datetime.datetime.utcnow().isoformat()
+            rows.append(row)
+
+        if not rows:
+            raise HTTPException(status_code=400, detail="PCAP conversion produced no multi-packet flows")
+
+        normalized_df = pd.DataFrame(rows)
+        csv_bytes = normalized_df.to_csv(index=False).encode("utf-8")
+        preview = [_flow_preview_from_row(row) for row in rows[:25]]
+        return csv_bytes, len(rows), preview
+
+
+def _flow_preview_from_row(row: dict) -> dict:
+    proto_map = {6: "TCP", 17: "UDP", 1: "ICMP", "6": "TCP", "17": "UDP", "1": "ICMP"}
+    protocol = row.get("Protocol", row.get("_protocol", ""))
+    return {
+        "timestamp": row.get("Timestamp") or datetime.datetime.utcnow().isoformat(),
+        "src_ip": str(row.get("Source IP") or row.get("_src_ip") or ""),
+        "dst_ip": str(row.get("Destination IP") or row.get("_dst_ip") or ""),
+        "dst_port": str(row.get("Destination Port") or row.get("_dst_port") or ""),
+        "protocol": proto_map.get(protocol, str(protocol).upper() if protocol != "" else ""),
+        "flow_bytes_s": row.get("Flow Bytes/s", 0),
+        "flow_features": {k: _json_safe(v) for k, v in row.items()},
+    }
+
+
+def _persist_manual_submission(result: dict, flow_preview: list[dict]) -> None:
+    db = SessionLocal()
+    try:
+        for flow in flow_preview:
+            try:
+                dst_port = int(flow.get("dst_port", 0) or 0)
+            except (TypeError, ValueError):
+                dst_port = 0
+            db.add(RawFlowDB(
+                timestamp=flow.get("timestamp") or datetime.datetime.utcnow().isoformat(),
+                src_ip=str(flow.get("src_ip", "")),
+                dst_ip=str(flow.get("dst_ip", "")),
+                dst_port=dst_port,
+                protocol=str(flow.get("protocol", "")),
+                flow_bytes_s=float(flow.get("flow_bytes_s", 0.0) or 0.0),
+            ))
+
+        for alert in result.get("alerts", []):
+            try:
+                dst_port = int(alert.get("dst_port", 0) or 0)
+            except (TypeError, ValueError):
+                dst_port = 0
+            db.add(AlertDB(
+                alert_id=alert["alert_id"],
+                timestamp=alert["timestamp"],
+                attack_type=alert["attack_type"],
+                src_ip=alert.get("src_ip", "N/A"),
+                dst_ip=alert.get("dst_ip", "N/A"),
+                dst_port=dst_port,
+                protocol=alert.get("protocol", "N/A"),
+                severity=alert["severity"],
+                confidence=alert["confidence"],
+                confidence_pct=alert["confidence_pct"],
+                is_false_positive=False,
+                is_zero_day=alert["is_zero_day"],
+                raw_features=alert.get("raw_features", {}),
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Manual flow submission persistence failed.")
+    finally:
+        db.close()
+
+
+async def _broadcast_live_update(result: dict, meta: dict, features: dict):
     """Broadcast a flow detection result to all connected WebSocket clients."""
     if not _state["ws_clients"]:
         return
 
+    flow_bytes_s = features.get("Flow Bytes/s", result.get("flow_bytes_s", 0))
     message = {
         "type": "flow",
         "data": {
@@ -349,7 +560,8 @@ async def _broadcast_live_update(result: dict, meta: dict):
             "dst_ip":           meta.get("dst_ip", ""),
             "dst_port":         str(meta.get("dst_port", "")),
             "protocol":         meta.get("protocol", 0),
-            "flow_bytes_s":     result.get("flow_bytes_s", 0),
+            "flow_bytes_s":     flow_bytes_s,
+            "flow_features":    _json_safe(features),
         },
     }
 

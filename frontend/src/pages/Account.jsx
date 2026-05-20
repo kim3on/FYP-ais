@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import '../components/Layout/Layout.css';
 import './Account.css';
@@ -38,6 +39,11 @@ export default function Account() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const isAdmin = useMemo(() => {
+    const roleLower = (currentUser?.role || '').toLowerCase();
+    return roleLower.includes('administrator') || roleLower === 'admin';
+  }, [currentUser]);
 
   const profile = useMemo(() => normalizeProfile(currentUser?.profile), [currentUser]);
   const displayName = profile.display_name || currentUser?.username || 'Unknown User';
@@ -167,6 +173,17 @@ export default function Account() {
             <DetailRow label="Escalation Contact" value={profile.escalation_contact} />
           </section>
         </div>
+      )}
+
+      {isAdmin && (
+        <section className="card" style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+          <div className="account-section-title" style={{ fontSize: '18px', fontWeight: '800', textAlign: 'center', marginBottom: '16px', letterSpacing: '0.1em', width: '100%' }}>
+            System Admin Portal
+          </div>
+          <Link to="/users" className="btn btn-primary" style={{ textDecoration: 'none', padding: '12px 32px', fontSize: '15px' }}>
+            User Management
+          </Link>
+        </section>
       )}
 
       <button className="btn btn-danger account-signout" onClick={logout}>

@@ -107,7 +107,8 @@ export default function Settings() {
     getSystemStatus().then(s => {
       setSystemStatus(s);
       if (s.active_model) setActiveModel(s.active_model);
-      if (s.threshold)    setThreshold(s.threshold);
+      if (s.threshold != null) setThreshold(Number(s.threshold));
+      if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
     }).catch(err => {
       console.error("Failed to fetch system status:", err);
     });
@@ -117,6 +118,11 @@ export default function Settings() {
   }, [setActiveModel]);
 
   async function handleSave() {
+    const model = MODELS.find(m => m.id === activeModel);
+    const confirmed = window.confirm(
+      `Save detection settings?\n\nActive model: ${model?.name || activeModel}\nAlert threshold: ${threshold.toFixed(2)}\nZero-day threshold: ${zdThreshold.toFixed(2)}`
+    );
+    if (!confirmed) return;
     setError(''); setSaved(false);
     setSaving(true);
     try {
@@ -126,9 +132,15 @@ export default function Settings() {
         zero_day_threshold: zdThreshold,
       });
       if (result.active_model) setActiveModel(result.active_model);
+      if (result.threshold != null) setThreshold(Number(result.threshold));
+      if (result.zero_day_threshold != null) setZdThreshold(Number(result.zero_day_threshold));
       setSaved(true);
       await refreshStatus();
-      getSystemStatus().then(setSystemStatus).catch(err => {
+      getSystemStatus().then(s => {
+        setSystemStatus(s);
+        if (s.threshold != null) setThreshold(Number(s.threshold));
+        if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
+      }).catch(err => {
         console.error("Failed to refresh system status:", err);
       });
       setTimeout(() => setSaved(false), 3000);
@@ -154,16 +166,25 @@ export default function Settings() {
 
   return (
     <div className="page settings-page">
+      <div className="settings-page-header">
+        <div>
+          <h1 className="page-title">System Settings</h1>
+          <p className="page-subtitle">Runtime detection preferences, model selection, and maintenance controls</p>
+        </div>
+        <button className="btn btn-primary settings-save" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+      </div>
+      {(error || saved) && (
+        <div className={`settings-message ${error ? 'error' : 'saved'}`}>
+          {error || 'Settings saved'}
+        </div>
+      )}
       <div className="settings-stack">
         <SettingSection
           icon={<ShieldIcon />}
           tone="accent"
           title="Detection Settings"
-          action={
-            <button className="btn btn-primary settings-save" onClick={handleSave}>
-              {saving ? 'Saving...' : 'Save Settings'}
-            </button>
-          }
         >
           <div className="settings-grid two">
             <FieldBlock label="Active Model">
@@ -201,12 +222,6 @@ export default function Settings() {
               </div>
             </FieldBlock>
           </div>
-
-          {(error || saved) && (
-            <div className={`settings-message ${error ? 'error' : 'saved'}`}>
-              {error || 'Settings saved'}
-            </div>
-          )}
         </SettingSection>
 
         <SettingSection icon={<BellIcon />} tone="success" title="Alert Configurations">

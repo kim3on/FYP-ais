@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { detectFromFile, getDetectionLogs, getDetectionResult } from '../api';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
+import { initializeNotificationSound, playCompletionSound } from '../utils/notificationSound';
 
 export default function Detection() {
   const [file, setFile]         = useState(null);
@@ -30,14 +31,21 @@ export default function Detection() {
 
   async function handleDetect() {
     if (!file) { setError('Please select a file.'); return; }
+    const confirmed = window.confirm(
+      `Run detection on "${file.name}"?\n\nRows: ${offset.toLocaleString()}-${(offset + limit).toLocaleString()}`
+    );
+    if (!confirmed) return;
+    initializeNotificationSound();
     setError(''); setLoading(true); setResult(null); setLogs([]);
     try {
       pollRef.current = setInterval(pollLogs, 1500);
       await detectFromFile(file, limit, offset);
       const r = await getDetectionResult();
       setResult(r);
+      playCompletionSound('success');
     } catch (err) {
       setError(err.message);
+      playCompletionSound('error');
     } finally {
       clearInterval(pollRef.current);
       const final = await getDetectionLogs().catch(()=>({logs:[]}));

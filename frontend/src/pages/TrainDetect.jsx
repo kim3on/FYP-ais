@@ -7,6 +7,7 @@ import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
 import './TrainDetect.css';
+import { initializeNotificationSound, playCompletionSound } from '../utils/notificationSound';
 import shieldIcon from '../assets/shield.svg';
 import chartArrowRiseIcon from '../assets/chart-arrow-rise.svg';
 import databaseIcon from '../assets/database.svg';
@@ -27,6 +28,57 @@ const DATASET_OPTIONS = [
     dropText: <>Drop a <span>.csv</span> file</>,
   },
 ];
+
+const METRIC_HELP = {
+  'Active Antibodies': 'Number of mature NSA/V-detectors stored after benign-only training. More detectors can improve coverage but may increase runtime.',
+  'Unsupervised Benign Calibration': 'Normal pass rate on held-out benign calibration traffic. This is not attack accuracy; it checks how much benign traffic passes the unsupervised threshold.',
+  'Current Dataset': 'Dataset profile currently loaded or trained for this page.',
+  'Target FPR': 'Target false-positive rate used to calibrate the unsupervised threshold on benign calibration traffic only.',
+  'Observed Benign FPR': 'Actual percentage of benign validation flows incorrectly flagged as anomalies during calibration.',
+  'Self Intrusion Rate': 'AIS autoimmunity check: benign validation samples incorrectly flagged by the AIS mechanism. Lower is better.',
+  'Normal Pass Rate': 'Percentage of benign calibration flows accepted as normal. It is 1 minus the observed benign false-positive rate.',
+  'Silhouette Score': 'Unsupervised separation score using predicted normal/anomaly groups in PCA space. Useful as a rough check, but limited because anomaly detection is not pure clustering.',
+  'Threshold': 'Saved unsupervised anomaly-score cutoff calibrated from benign traffic only.',
+  'Total Flows': 'Number of flows analysed in this detection run.',
+  'Anomalies': 'Number of flows flagged as anomalies by the unsupervised detector.',
+  'Zero-Day Candidates': 'Anomaly alerts that do not match a known detector explanation strongly enough and are treated as unknown candidates.',
+  'Anomaly Rate': 'Percentage of analysed flows flagged as anomalies by the unsupervised detector.',
+  'Normal Flows': 'Number of analysed flows that were not flagged as anomalies.',
+  'Recall / TPR': 'Post-run labelled verification only: percentage of labelled attacks caught by the unsupervised detector.',
+  'False Neg. Rate': 'Post-run labelled verification only: percentage of labelled attacks missed. Lower is better for IDS.',
+  FNR: 'Post-run labelled verification only: percentage of labelled attacks missed. Lower is better for IDS.',
+  'False Pos. Rate': 'Post-run labelled verification only: percentage of labelled normal flows incorrectly alerted as attacks.',
+  FPR: 'Post-run labelled verification only: percentage of labelled normal flows incorrectly alerted as attacks.',
+  Precision: 'Post-run labelled verification only: percentage of predicted anomalies that were actually labelled attacks.',
+  'F1 Score': 'Post-run labelled verification only: harmonic mean of precision and recall.',
+  'Accuracy (secondary)': 'Post-run labelled verification only. Secondary metric because IDS datasets are usually imbalanced and high accuracy can hide missed attacks.',
+  'TP - Attacks Caught': 'True positives: labelled attack flows correctly flagged as anomalies.',
+  'FN - Attacks Missed': 'False negatives: labelled attack flows incorrectly passed as normal.',
+  'FP - False Alarms': 'False positives: labelled normal flows incorrectly flagged as anomalies.',
+  'TN - Normal Passed': 'True negatives: labelled normal flows correctly passed as normal.',
+  'Recommended Threshold': 'Report-only threshold from threshold analysis. It does not change the saved unsupervised model threshold.',
+};
+
+function metricHelp(label) {
+  return METRIC_HELP[label] || METRIC_HELP[label?.replace(/\s+/g, ' ')] || '';
+}
+
+function MetricLabel({ label, className = 'td-detail-label' }) {
+  const help = metricHelp(label);
+  if (!help) return <div className={className}>{label}</div>;
+  return (
+    <div
+      className={`${className} td-metric-help`}
+      tabIndex={0}
+      title={help}
+      aria-label={`${label}: ${help}`}
+      data-help={help}
+    >
+      <span>{label}</span>
+      <span className="td-help-dot" aria-hidden="true">?</span>
+    </div>
+  );
+}
 
 function DatasetSelector({ value, onChange }) {
   const selected = DATASET_OPTIONS.find(option => option.id === value) || DATASET_OPTIONS[0];
@@ -135,7 +187,7 @@ function MetricsGrid({ result }) {
       <div className="td-metric-grid">
         {displayRows.map(([label, val, type]) => (
           <div key={label} className="td-model-metric">
-            <div className="td-detail-label">{label}</div>
+            <MetricLabel label={label} />
             <div className="td-model-metric-value">{type === 'count' ? val.toLocaleString() : formatMetric(label, val)}</div>
           </div>
         ))}
@@ -145,7 +197,7 @@ function MetricsGrid({ result }) {
         <div className="td-confusion-grid">
           {counts.map(([label, val]) => (
             <div key={label} className="td-confusion-row">
-              <span>{label}</span>
+              <MetricLabel label={label} className="td-confusion-label" />
               <strong>{val.toLocaleString()}</strong>
             </div>
           ))}
@@ -167,19 +219,19 @@ function ThresholdSummary({ analysis }) {
       </div>
       <div className="td-detail-metrics">
         <div className="td-detail-metric">
-          <div className="td-detail-label">Recommended Threshold</div>
+          <MetricLabel label="Recommended Threshold" />
           <div className="td-detail-value">{rec.threshold?.toFixed ? rec.threshold.toFixed(4) : rec.threshold}</div>
         </div>
         <div className="td-detail-metric">
-          <div className="td-detail-label">Recall / TPR</div>
+          <MetricLabel label="Recall / TPR" />
           <div className="td-detail-value" style={{ color: 'var(--success)' }}>{pct(rec.recall)}</div>
         </div>
         <div className="td-detail-metric">
-          <div className="td-detail-label">FNR</div>
+          <MetricLabel label="FNR" />
           <div className="td-detail-value" style={{ color: 'var(--danger)' }}>{pct(rec.false_negative_rate)}</div>
         </div>
         <div className="td-detail-metric">
-          <div className="td-detail-label">FPR</div>
+          <MetricLabel label="FPR" />
           <div className="td-detail-value" style={{ color: 'var(--warning)' }}>{pct(rec.false_positive_rate)}</div>
         </div>
       </div>
@@ -221,6 +273,11 @@ function TrainingTab() {
 
   async function handleTrain() {
     if (!file) { setError('Select a dataset file first.'); return; }
+    const confirmed = window.confirm(
+      `Start training with "${file.name}"?\n\nThis may take a while and will replace the current trained model for the selected dataset profile.`
+    );
+    if (!confirmed) return;
+    initializeNotificationSound();
     setError(''); setLoading(true); setResult(null);
     setLogs(['[INFO] Starting NSA training pipeline…']);
 
@@ -257,6 +314,7 @@ function TrainingTab() {
               console.error("Failed to fetch training result:", err);
             }
             refreshStatus();
+            playCompletionSound(d.status === 'error' ? 'error' : 'success');
           }
         } catch (err) {
           console.error("Failed to poll training logs:", err);
@@ -394,6 +452,11 @@ function DetectionTab() {
 
   async function handleDetect() {
     if (!file) { setError('Select a file first.'); return; }
+    const confirmed = window.confirm(
+      `Run detection on "${file.name}"?\n\nRows: ${offset.toLocaleString()}-${(offset + limit).toLocaleString()}`
+    );
+    if (!confirmed) return;
+    initializeNotificationSound();
     setError(''); setLoading(true); setResult(null);
     setLogs(['[INFO] Starting batch detection…']);
     try {
@@ -413,6 +476,7 @@ function DetectionTab() {
             setLoading(false);
             const r = await getDetectionResult().catch(() => null);
             if (r) setResult(r);
+            playCompletionSound(d.status === 'error' ? 'error' : 'success');
           }
         } catch (err) {
           console.error("Failed to poll detection logs:", err);
@@ -488,16 +552,16 @@ function DetectionTab() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
               <div className="stat-card">
-                <div className="stat-label">Total Flows</div>
+                <MetricLabel label="Total Flows" className="stat-label" />
                 <div className="stat-value">{result.total_checked ?? result.total_flows ?? alerts.length}</div>
               </div>
               <div className="stat-card" style={{ borderColor: anomCount > 0 ? 'var(--danger-border)' : 'var(--border)' }}>
-                <div className="stat-label" style={{ color: 'var(--danger)' }}>Anomalies</div>
+                <MetricLabel label="Anomalies" className="stat-label danger-label" />
                 <div className="stat-value" style={{ color: anomCount > 0 ? 'var(--danger)' : 'var(--text-primary)' }}>{anomCount}</div>
               </div>
               {zdCount > 0 && (
                 <div className="stat-card" style={{ borderColor: 'var(--iris-border)', gridColumn: 'span 2' }}>
-                  <div className="stat-label" style={{ color: 'var(--iris)' }}>⚠ Zero-Day Candidates</div>
+                  <MetricLabel label="Zero-Day Candidates" className="stat-label iris-label" />
                   <div className="stat-value" style={{ color: 'var(--iris)' }}>{zdCount}</div>
                 </div>
               )}
@@ -581,7 +645,8 @@ function GlobalTrainingResult() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '12px' }}>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
-            <SummaryIcon src={shieldIcon} alt="" tone="accent" /> Active Antibodies
+            <SummaryIcon src={shieldIcon} alt="" tone="accent" />
+            <MetricLabel label="Active Antibodies" className="td-summary-metric-label" />
           </div>
           <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', fontFamily: "'JetBrains Mono', monospace" }}>
             {detectors.toLocaleString()}
@@ -593,7 +658,8 @@ function GlobalTrainingResult() {
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
-            <SummaryIcon src={chartArrowRiseIcon} alt="" tone="success" /> {accuracyTitle}
+            <SummaryIcon src={chartArrowRiseIcon} alt="" tone="success" />
+            <MetricLabel label={accuracyTitle} className="td-summary-metric-label" />
           </div>
           <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', fontFamily: "'JetBrains Mono', monospace" }}>
             {accuracyValue}
@@ -605,7 +671,8 @@ function GlobalTrainingResult() {
 
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-h)', fontSize: '11px', fontWeight: 500 }}>
-            <SummaryIcon src={databaseIcon} alt="" tone="iris" /> Current Dataset
+            <SummaryIcon src={databaseIcon} alt="" tone="iris" />
+            <MetricLabel label="Current Dataset" className="td-summary-metric-label" />
           </div>
           <div style={{ fontSize: '22px', fontWeight: 400, color: 'var(--text-h)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "'JetBrains Mono', monospace" }}>
             {datasetName}
@@ -623,7 +690,7 @@ function GlobalTrainingResult() {
           <div className="td-detail-metrics">
             {detailMetrics.map(([label, val, color]) => (
               <div key={label} className="td-detail-metric">
-                <div className="td-detail-label">{label}</div>
+                <MetricLabel label={label} />
                 <div className="td-detail-value" style={{ color }}>{val}</div>
               </div>
             ))}

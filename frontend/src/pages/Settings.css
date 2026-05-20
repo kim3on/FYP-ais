@@ -10,6 +10,14 @@
   width: 100%;
 }
 
+.settings-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .settings-section {
   display: grid;
   grid-template-columns: 26px 1fr;
@@ -322,6 +330,10 @@
 
   .settings-section-head {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-page-header {
     flex-direction: column;
   }
 

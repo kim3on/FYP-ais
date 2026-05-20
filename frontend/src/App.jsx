@@ -11,6 +11,7 @@ const Alerts = lazy(() => import('./pages/Alerts'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Account = lazy(() => import('./pages/Account'));
 const Accessibility = lazy(() => import('./pages/Accessibility'));
+const Users = lazy(() => import('./pages/Users'));
 
 function CatchAll() {
   const navigate = useNavigate();
@@ -59,6 +60,7 @@ export default function App() {
                   <Route path="alerts"   element={<Alerts />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="account"       element={<Account />} />
+                  <Route path="users"         element={<Users />} />
                   <Route path="accessibility" element={<Accessibility />} />
                 </Route>
                 <Route path="*" element={<CatchAll />} />

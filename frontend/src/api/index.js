@@ -75,7 +75,25 @@ export async function exportAlertsCSV(params = {}) {
   const match = disposition.match(/filename="?([^"]+)"?/i);
   return {
     blob,
-    filename: match?.[1] || `alerts_analysis_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+    filename: match?.[1] || `alerts_summary_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+  };
+}
+export async function exportRawAlertsCSV(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const url = `/api/alerts/export_raw.csv${query.toString() ? `?${query}` : ''}`;
+  const res = await fetch(url, { headers: authHeader() });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  return {
+    blob,
+    filename: match?.[1] || `alerts_raw_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
   };
 }
 
@@ -132,6 +150,18 @@ export async function stopCapture() {
 export async function clearRawFlows() {
   return apiFetch('/api/capture/flows', { method: 'DELETE' });
 }
+export async function submitFlowFile(file, limit = 1000) {
+  const form = new FormData();
+  form.append('file', file);
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : '';
+  const res = await fetch(`/api/capture/submit-flow${query}`, {
+    method: 'POST',
+    headers: authHeader(),
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
 
 // ── Firewall / IP Blocking ────────────────────────────────────
 export async function blockIP(ip, reason) {
@@ -158,6 +188,25 @@ export async function updateSettings(settings) {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
+  });
+}
+
+// ── Users ─────────────────────────────────────────────────────
+export async function getUsers() {
+  return apiFetch('/api/users');
+}
+
+export async function createUser(username, password, role) {
+  return apiFetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, role }),
+  });
+}
+
+export async function deleteUser(username) {
+  return apiFetch(`/api/users/${username}`, {
+    method: 'DELETE',
   });
 }
 

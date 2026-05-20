@@ -31,6 +31,8 @@ from app.core.evaluator import (
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_RUNTIME_THRESHOLD = 0.50
+DEFAULT_ZERO_DAY_THRESHOLD = 0.65
 
 
 @dataclass
@@ -92,12 +94,16 @@ class DetectionEngine:
         active_model: str = "nsa",
         self_boundary=None,
         pca_self_boundary=None,
+        threshold: float = DEFAULT_RUNTIME_THRESHOLD,
+        zero_day_threshold: float = DEFAULT_ZERO_DAY_THRESHOLD,
     ):
         self.model = model
         self.preprocessor = preprocessor
         self.active_model = active_model
         self.self_boundary = self_boundary
         self.pca_self_boundary = pca_self_boundary
+        self.threshold = float(threshold)
+        self.zero_day_threshold = float(zero_day_threshold)
         self.dataset_type = normalize_dataset_type(
             getattr(preprocessor, "dataset_type", None)
         )
@@ -169,26 +175,29 @@ class DetectionEngine:
             labels, scores, raw_scores = self.model.predict_fused(
                 X_pca,
                 self_boundary_scores=pca_sb_scores,
+                alert_threshold=self.threshold,
             )
             decision_components = self.model.decision_components(
                 X_pca,
                 self_boundary_scores=pca_sb_scores,
+                alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
             if decision_components is not None:
                 decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
                 if sb_flags is not None:
                     decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
             min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
-            nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
+            nsa_flags = self.model.predict(X_pca, alert_threshold=self.threshold) if hasattr(self.model, "predict") else None
         else:
             if hasattr(self.model, 'predict_with_details'):
-                labels, scores, min_dists = self.model.predict_with_details(X_pca)
+                labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
             else:
-                labels, scores = self.model.predict_with_scores(X_pca)
+                labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
                 min_dists = None
             raw_scores = self._raw_anomaly_scores(X_pca, scores)
             decision_components = self.model.decision_components(
                 X_pca,
+                alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
             if self.self_boundary is not None and df_raw is not None:
                 sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
@@ -234,26 +243,29 @@ class DetectionEngine:
             labels, scores, raw_scores = self.model.predict_fused(
                 X_pca,
                 self_boundary_scores=pca_sb_scores,
+                alert_threshold=self.threshold,
             )
             decision_components = self.model.decision_components(
                 X_pca,
                 self_boundary_scores=pca_sb_scores,
+                alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
             if decision_components is not None:
                 decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
                 if sb_flags is not None:
                     decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
             min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
-            nsa_flags = self.model.predict(X_pca) if hasattr(self.model, "predict") else None
+            nsa_flags = self.model.predict(X_pca, alert_threshold=self.threshold) if hasattr(self.model, "predict") else None
         else:
             if hasattr(self.model, 'predict_with_details'):
-                labels, scores, min_dists = self.model.predict_with_details(X_pca)
+                labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
             else:
-                labels, scores = self.model.predict_with_scores(X_pca)
+                labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
                 min_dists = None
             raw_scores = self._raw_anomaly_scores(X_pca, scores)
             decision_components = self.model.decision_components(
                 X_pca,
+                alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
 
         return self._build_result(
@@ -336,12 +348,14 @@ class DetectionEngine:
                     nsa_flagged = bool(nsa_flags[i] == 1)
                 elif hasattr(self.model, 'predict_with_details'):
                     nsa_labels_only, _, _ = self.model.predict_with_details(
-                        features[i:i+1] if features is not None else np.zeros((1, 1))
+                        features[i:i+1] if features is not None else np.zeros((1, 1)),
+                        alert_threshold=self.threshold,
                     )
                     nsa_flagged = bool(nsa_labels_only[0] == 1)
                 elif hasattr(self.model, 'predict_with_scores'):
                     nsa_labels_only, _ = self.model.predict_with_scores(
-                        features[i:i+1] if features is not None else np.zeros((1, 1))
+                        features[i:i+1] if features is not None else np.zeros((1, 1)),
+                        alert_threshold=self.threshold,
                     )
                     nsa_flagged = bool(nsa_labels_only[0] == 1)
 
@@ -375,7 +389,7 @@ class DetectionEngine:
             attack_family = (
                 "Unknown Anomaly"
                 if self.dataset_type == DATASET_NSL_KDD
-                else self._attribute_attack(row, novelty_score=score)
+                else self._attribute_attack(row, novelty_score=score, zero_day_threshold=self.zero_day_threshold)
             )
             is_zero_day = (attack_family == 'Zero-Day Candidate')
 
@@ -595,7 +609,12 @@ class DetectionEngine:
     #  family.  A wrong guess does NOT count as a false negative.           #
     # ================================================================== #
 
-    def _attribute_attack(self, row, novelty_score: float = 0.0) -> str:
+    def _attribute_attack(
+        self,
+        row,
+        novelty_score: float = 0.0,
+        zero_day_threshold: float | None = None,
+    ) -> str:
         """
         Post-detection attack family attribution using flow features only.
 
@@ -703,7 +722,9 @@ class DetectionEngine:
         # ════════════════════════════════════════════════════════════════
         #  ZERO-DAY — high confidence, no known signature matched
         # ════════════════════════════════════════════════════════════════
-        if novelty_score >= 0.65:
+        if zero_day_threshold is None:
+            zero_day_threshold = self.zero_day_threshold
+        if novelty_score >= float(zero_day_threshold):
             return 'Zero-Day Candidate'
 
         return 'Unknown Anomaly'

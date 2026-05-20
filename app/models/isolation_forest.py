@@ -159,36 +159,54 @@ class IsolationForestDetector:
     #  DETECTION                                                           #
     # ------------------------------------------------------------------ #
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _runtime_threshold_factor(alert_threshold: float | None) -> float:
+        if alert_threshold is None:
+            return 1.0
+        try:
+            return max(float(alert_threshold), 1e-9) / 0.50
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _runtime_threshold_and_scale(self, alert_threshold: float | None) -> tuple[float, float]:
+        threshold = float(self.score_threshold_)
+        factor = self._runtime_threshold_factor(alert_threshold)
+        adjusted_threshold = threshold * factor
+        scale = float(self.score_scale_ or threshold * 1.5) * factor
+        return adjusted_threshold, max(scale, adjusted_threshold + 1e-9)
+
+    def predict(self, X: np.ndarray, alert_threshold: float | None = None) -> np.ndarray:
         """
         Returns labels: 0 = normal, 1 = anomaly.
         (sklearn returns +1 for normal, -1 for anomaly — we invert this.)
         """
         self._check_fitted()
         if self.score_threshold_ is not None:
-            return (self.raw_anomaly_scores(X) > self.score_threshold_).astype(int)
+            threshold, _ = self._runtime_threshold_and_scale(alert_threshold)
+            return (self.raw_anomaly_scores(X) > threshold).astype(int)
         raw = self._model.predict(X)          # +1 normal, -1 anomaly
         return np.where(raw == -1, 1, 0).astype(int)
 
-    def predict_with_scores(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def predict_with_scores(
+        self,
+        X: np.ndarray,
+        alert_threshold: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns (labels, confidence_scores).
         Score is in [0, 1], higher = more anomalous.
         """
         self._check_fitted()
         raw_anomaly = self.raw_anomaly_scores(X)
-        labels = self.predict(X)
+        labels = self.predict(X, alert_threshold=alert_threshold)
 
         # Use fixed calibration ranges so confidence does not change with batch
         # composition. If a benign threshold is available, confidence is scaled
         # around that threshold to match the IDS decision rule.
         if self.score_threshold_ is not None:
-            scale = max(
-                float(self.score_scale_ or self.score_threshold_ * 1.5),
-                self.score_threshold_ + 1e-9,
-            )
+            threshold, scale = self._runtime_threshold_and_scale(alert_threshold)
             scores = np.clip(
-                (raw_anomaly - self.score_threshold_) / max(scale - self.score_threshold_, 1e-9),
+                (raw_anomaly - threshold) / max(scale - threshold, 1e-9),
                 0.0,
                 1.0,
             )

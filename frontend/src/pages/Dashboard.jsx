@@ -4,6 +4,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import {
   getAlerts,
   getInterfaces, startCapture, stopCapture, getCaptureStatus,
+  submitFlowFile,
 } from '../api';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
@@ -54,6 +55,48 @@ const DONUT_OPTS = {
   responsive: true, maintainAspectRatio: false, animation: false,
   plugins: { legend: { display: false } },
 };
+
+function csvEscape(value) {
+  if (value == null) return '';
+  const text = String(value);
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function timestampForFilename(date = new Date()) {
+  const pad = value => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '_',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('');
+}
+
+function featureValueForExport(value) {
+  if (value == null) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return value;
+}
+
+function exportColumnKeys(flows) {
+  const keys = [];
+  const seen = new Set();
+  flows.forEach(flow => {
+    Object.keys(flow.flow_features || {}).forEach(key => {
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
+      }
+    });
+  });
+  return keys;
+}
 
 // ── SVG icons for metric cards ──────────────────────────────────────────────
 const IcoList    = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
@@ -138,6 +181,10 @@ export default function Dashboard() {
   const [selectedIf, setSelectedIf]   = useState('');
   const [captureStatus, setCaptureStatus] = useState(null);
   const [captureError, setCaptureError]   = useState('');
+  const [flowFile, setFlowFile] = useState(null);
+  const [flowSubmitting, setFlowSubmitting] = useState(false);
+  const [flowSubmitMessage, setFlowSubmitMessage] = useState('');
+  const [flowSubmitError, setFlowSubmitError] = useState('');
 
   // WebSocket — active whenever captureRunning is true
   useWebSocket('/ws/live', useCallback((msg) => {
@@ -169,7 +216,8 @@ export default function Dashboard() {
         dst_ip: data.dst_ip,
         dst_port: data.dst_port,
         protocol: data.protocol === 6 ? 'TCP' : data.protocol === 17 ? 'UDP' : data.protocol === 1 ? 'ICMP' : String(data.protocol),
-        flow_bytes_s: data.flow_bytes_s
+        flow_bytes_s: data.flow_bytes_s,
+        flow_features: data.flow_features || {},
       };
       setLiveRawFlows(prev => [newFlow, ...prev].slice(0, 1000));
 
@@ -264,18 +312,54 @@ export default function Dashboard() {
     try { await stopCapture(); setCaptureRunning(false); } catch(e) { setCaptureError(e.message); }
   }
 
+  async function handleSubmitFlow() {
+    if (!flowFile) return;
+    setFlowSubmitting(true);
+    setFlowSubmitMessage('');
+    setFlowSubmitError('');
+    try {
+      const response = await submitFlowFile(flowFile, 1000);
+      const result = response.result || {};
+      const submittedAlerts = result.alerts || [];
+      submittedAlerts.forEach(a => pushAlert(a));
+      if (Array.isArray(response.flow_preview) && response.flow_preview.length > 0) {
+        setLiveRawFlows(prev => [...response.flow_preview, ...prev].slice(0, 1000));
+      }
+      await refreshDashStats();
+      setFlowSubmitMessage(
+        response.converted
+          ? `Converted ${response.converted_flow_count || 0} flows · ${result.anomalies_found || 0} anomalies`
+          : `Analysed ${result.total_checked || 0} flows · ${result.anomalies_found || 0} anomalies`
+      );
+    } catch (err) {
+      setFlowSubmitError(err.message || 'Failed to submit flow file');
+    } finally {
+      setFlowSubmitting(false);
+    }
+  }
+
   function downloadRawCapture() {
     if (liveRawFlows.length === 0) return;
-    const header = ['Timestamp', 'Source IP', 'Destination IP', 'Port', 'Protocol', 'Bytes/s'];
+    const featureKeys = exportColumnKeys(liveRawFlows);
+    const compactHeader = ['Timestamp', 'Source IP', 'Destination IP', 'Port', 'Protocol', 'Bytes/s'];
+    const header = [...compactHeader, ...featureKeys];
     const csv = [
-      header.join(','),
-      ...liveRawFlows.map(f => [f.timestamp, f.src_ip, f.dst_ip, f.dst_port, f.protocol, Math.round(f.flow_bytes_s)].join(','))
+      header.map(csvEscape).join(','),
+      ...liveRawFlows.map(f => [
+        f.timestamp,
+        f.src_ip,
+        f.dst_ip,
+        f.dst_port,
+        f.protocol,
+        Number.isFinite(Number(f.flow_bytes_s)) ? Math.round(Number(f.flow_bytes_s)) : '',
+        ...featureKeys.map(key => featureValueForExport(f.flow_features?.[key])),
+      ].map(csvEscape).join(','))
     ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `raw_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.download = `live_cicflow_features_${timestampForFilename()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -452,13 +536,13 @@ export default function Dashboard() {
       {/* ── Live Capture Controls ───────────────────────────────── */}
       <div className="card" style={{marginBottom:'16px'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'12px'}}>
-          <div className="section-label" style={{margin:0}}>Live Packet Capture</div>
-          <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <div className="section-label" style={{margin:0}}>Live Capture</div>
+          <div className="capture-control-grid">
             <select
               value={selectedIf}
               onChange={e=>setSelectedIf(e.target.value)}
               disabled={captureRunning}
-              style={{width:'auto',minWidth:'200px',padding:'6px 10px'}}
+              style={{width:'100%',padding:'6px 10px'}}
             >
               {interfaces.length===0
                 ? <option>No interfaces found</option>
@@ -469,13 +553,15 @@ export default function Dashboard() {
                   })
               }
             </select>
-            <button className="btn btn-primary" onClick={handleStartCapture} disabled={captureRunning||!selectedIf}>
-              ▶ Start
-            </button>
-            <button className="btn btn-danger" onClick={handleStopCapture} disabled={!captureRunning}>
-              ■ Stop
-            </button>
-            <div style={{display:'flex',alignItems:'center',gap:'6px',fontFamily:'var(--font-mono)',fontSize:'11px',color:'var(--text-secondary)'}}>
+            <div className="capture-action-pair">
+              <button className="btn btn-primary" onClick={handleStartCapture} disabled={captureRunning||!selectedIf} style={{width:'100%',justifyContent:'center'}}>
+                ▶ Start
+              </button>
+              <button className="btn btn-danger" onClick={handleStopCapture} disabled={!captureRunning} style={{width:'100%',justifyContent:'center'}}>
+                ■ Stop
+              </button>
+            </div>
+            <div className="capture-control-status">
               <span className={`status-dot ${captureRunning?'online':'offline'}`}/>
               {captureRunning ? 'Capturing…' : 'Idle'}
             </div>
@@ -484,6 +570,66 @@ export default function Dashboard() {
         {captureError && (
           <div style={{marginTop:'10px',background:'var(--danger-subtle)',border:'1px solid var(--danger-border)',color:'var(--danger)',padding:'8px 12px',borderRadius:'var(--radius)',fontSize:'11px',fontFamily:'var(--font-mono)'}}>
             ⚠ {captureError}
+          </div>
+        )}
+      </div>
+
+      {/* ── Manual Flow Submission ─────────────────────────────── */}
+      <div className="card" style={{marginBottom:'16px'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'12px'}}>
+          <div>
+            <div className="section-label" style={{marginBottom:'4px'}}>Submit Network Flow</div>
+            <div style={{fontFamily:'var(--font-mono)',fontSize:'10px',color:'var(--text-tertiary)'}}>
+              Upload CIC flow CSV/Parquet or PCAP/PCAPNG. Packet captures are converted to flow features before analysis.
+            </div>
+          </div>
+          <div className="capture-control-grid">
+            <input
+              id="manual-flow-file"
+              type="file"
+              accept=".csv,.parquet,.pq,.pcap,.pcapng"
+              style={{display:'none'}}
+              onChange={e => {
+                setFlowFile(e.target.files?.[0] || null);
+                setFlowSubmitMessage('');
+                setFlowSubmitError('');
+              }}
+            />
+            <button
+              className="btn btn-default"
+              type="button"
+              onClick={() => document.getElementById('manual-flow-file')?.click()}
+              disabled={flowSubmitting}
+              style={{width:'100%',justifyContent:'center'}}
+            >
+              Choose File
+            </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={handleSubmitFlow}
+              disabled={!flowFile || flowSubmitting}
+              style={{width:'100%',justifyContent:'center'}}
+            >
+              {flowSubmitting ? <><span className="spinner" /> Analysing…</> : 'Submit'}
+            </button>
+            <div className="capture-control-status">
+              {flowFile ? flowFile.name : 'No file selected'}
+            </div>
+          </div>
+        </div>
+        {(flowSubmitMessage || flowSubmitError) && (
+          <div style={{
+            marginTop:'10px',
+            background: flowSubmitError ? 'var(--danger-subtle)' : 'var(--success-subtle)',
+            border: `1px solid ${flowSubmitError ? 'var(--danger-border)' : 'var(--success-border)'}`,
+            color: flowSubmitError ? 'var(--danger)' : 'var(--success)',
+            padding:'8px 12px',
+            borderRadius:'var(--radius)',
+            fontSize:'11px',
+            fontFamily:'var(--font-mono)'
+          }}>
+            {flowSubmitError ? `⚠ ${flowSubmitError}` : `✓ ${flowSubmitMessage}`}
           </div>
         )}
       </div>
@@ -508,7 +654,7 @@ export default function Dashboard() {
               Clear
             </button>
             <button className="btn btn-primary" style={{fontSize:'11px',padding:'4px 10px'}} onClick={downloadRawCapture} disabled={liveRawFlows.length === 0}>
-              ↓ Export CSV
+              ↓ Export Full Features
             </button>
           </div>
         </div>

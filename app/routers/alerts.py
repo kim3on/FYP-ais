@@ -8,7 +8,7 @@ PATCH /api/alerts/{id}/fp      — mark alert as false positive
 """
 
 import csv
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from io import StringIO
 
@@ -27,39 +27,18 @@ router = APIRouter(
 )
 
 
-CSV_HEADERS = [
-    "exported_at",
-    "analysis_window_start",
-    "analysis_window_end",
-    "alert_id",
-    "timestamp",
-    "date",
-    "hour",
-    "attack_type",
-    "attack_family",
-    "severity",
-    "severity_rank",
-    "confidence",
-    "confidence_pct",
-    "risk_score",
-    "src_ip",
-    "dst_ip",
-    "dst_port",
-    "protocol",
-    "endpoint_pair",
-    "is_zero_day",
-    "is_false_positive",
-    "review_status",
-    "repeat_count_src_ip",
-    "repeat_count_dst_ip",
-    "repeat_count_attack_type",
-    "repeat_count_endpoint_pair",
-    "recommended_action",
-    "analysis_note",
-]
-
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 SEVERITY_BASE_SCORE = {"critical": 90, "high": 70, "medium": 50, "low": 30}
+ACTION_LEGEND = {
+    "FP_AUDIT": "False positive retained for review/audit; no immediate response required.",
+    "MANUAL_ZERO_DAY": "Manually inspect raw flow context and monitor recurrence because this is a zero-day candidate.",
+    "INVESTIGATE_NOW": "Prioritize investigation; consider containment or source blocking if corroborated.",
+    "REVIEW_AUTH": "Review authentication logs and enforce account lockout or credential controls.",
+    "CHECK_EXPOSURE": "Check exposed services and monitor for follow-up exploitation.",
+    "RATE_LIMIT": "Validate traffic volume and apply rate limiting or upstream filtering where appropriate.",
+    "REVIEW_WEB": "Review web access logs and inspect the affected application endpoint.",
+    "MONITOR": "Monitor and correlate with host, firewall, and application logs.",
+}
 
 
 def _require_export_role(user):
@@ -92,17 +71,13 @@ def _attack_family(attack_type: str) -> str:
     return "Unknown"
 
 
-def _split_timestamp(value: str) -> tuple[str, str]:
-    raw = value or ""
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        return dt.date().isoformat(), f"{dt.hour:02d}:00"
-    except ValueError:
-        return raw[:10], raw[11:13] + ":00" if len(raw) >= 13 else ""
-
-
-def _endpoint_pair(alert: AlertDB) -> str:
-    return f"{alert.src_ip or 'N/A'} -> {alert.dst_ip or 'N/A'}:{alert.dst_port or 'N/A'}"
+def _endpoint_key(alert: AlertDB) -> tuple[str, str, str, str]:
+    return (
+        alert.src_ip or "N/A",
+        alert.dst_ip or "N/A",
+        str(alert.dst_port or "N/A"),
+        alert.protocol or "N/A",
+    )
 
 
 def _risk_score(alert: AlertDB, repeat_count: int) -> int:
@@ -121,37 +96,22 @@ def _risk_score(alert: AlertDB, repeat_count: int) -> int:
     return int(min(round(score), 100))
 
 
-def _recommended_action(alert: AlertDB, family: str, repeat_count: int, risk_score: int) -> str:
+def _action_code(alert: AlertDB, family: str, repeat_count: int, risk_score: int) -> str:
     if alert.is_false_positive:
-        return "No action; retained for audit as false positive"
+        return "FP_AUDIT"
     if alert.is_zero_day:
-        return "Manual review required; compare raw flow features and monitor recurrence"
+        return "MANUAL_ZERO_DAY"
     if risk_score >= 90 or repeat_count >= 10:
-        return "Investigate immediately; consider containment or source blocking"
+        return "INVESTIGATE_NOW"
     if family == "Brute Force":
-        return "Review authentication logs and enforce account lockout controls"
+        return "REVIEW_AUTH"
     if family == "Reconnaissance":
-        return "Check exposed services and monitor for follow-up exploitation"
+        return "CHECK_EXPOSURE"
     if family in {"DoS", "DDoS"}:
-        return "Validate traffic volume and apply rate limiting or upstream filtering"
+        return "RATE_LIMIT"
     if family == "Web Attack":
-        return "Review web access logs and inspect affected application endpoint"
-    return "Monitor and correlate with host, firewall, and application logs"
-
-
-def _analysis_note(alert: AlertDB, family: str, repeat_count: int, risk_score: int) -> str:
-    if alert.is_false_positive:
-        return "Alert was reviewed and marked as a false positive."
-    parts = [
-        f"{family} alert with {alert.severity or 'unknown'} severity",
-        f"{alert.confidence_pct or round(float(alert.confidence or 0) * 100)} confidence",
-    ]
-    if repeat_count > 1:
-        parts.append(f"seen {repeat_count} times for the same endpoint pair")
-    if alert.is_zero_day:
-        parts.append("classified as zero-day candidate")
-    parts.append(f"risk score {risk_score}/100")
-    return "; ".join(parts) + "."
+        return "REVIEW_WEB"
+    return "MONITOR"
 
 
 def _base_alert_query(db: Session, severity: Optional[str], attack_type: Optional[str],
@@ -171,6 +131,216 @@ def _base_alert_query(db: Session, severity: Optional[str], attack_type: Optiona
     if to:
         query = query.filter(AlertDB.timestamp <= to)
     return query
+
+
+def _csv_safe(value):
+    """Prevent Excel formula injection while leaving csv.writer to quote cells."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    text = str(value)
+    if text and text.lstrip()[:1] in {"=", "+", "-", "@"}:
+        return "'" + text
+    return text
+
+
+def _write_csv_section(writer, title: str, headers: list[str], rows: list[list]):
+    writer.writerow([f"# {title}"])
+    writer.writerow([_csv_safe(cell) for cell in headers])
+    for row in rows:
+        writer.writerow([_csv_safe(cell) for cell in row])
+    writer.writerow([])
+
+
+def _parse_timestamp_for_sort(value: str) -> datetime:
+    raw = value or ""
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _percentage(count: int, total: int) -> str:
+    if total <= 0:
+        return "0.0%"
+    return f"{(count / total) * 100:.1f}%"
+
+
+def _max_severity(alerts: list[AlertDB]) -> str:
+    if not alerts:
+        return "N/A"
+    return max(
+        ((a.severity or "low").lower() for a in alerts),
+        key=lambda severity: SEVERITY_RANK.get(severity, 0),
+    )
+
+
+def _mode(values) -> str:
+    clean = [value for value in values if value]
+    if not clean:
+        return "Unknown"
+    return Counter(clean).most_common(1)[0][0]
+
+
+def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: str) -> dict:
+    endpoint_counts = Counter(_endpoint_key(alert) for alert in alerts)
+    records = []
+
+    for alert in alerts:
+        endpoint = _endpoint_key(alert)
+        repeat_count = endpoint_counts[endpoint]
+        family = _attack_family(alert.attack_type or "")
+        severity = (alert.severity or "low").lower()
+        risk = _risk_score(alert, repeat_count)
+        records.append({
+            "alert": alert,
+            "family": family,
+            "severity": severity,
+            "risk": risk,
+            "endpoint": endpoint,
+            "repeat_count": repeat_count,
+            "action_code": _action_code(alert, family, repeat_count, risk),
+        })
+
+    total = len(records)
+    false_positive_count = sum(1 for item in records if item["alert"].is_false_positive)
+    zero_day_count = sum(1 for item in records if item["alert"].is_zero_day)
+    actionable_count = sum(1 for item in records if not item["alert"].is_false_positive)
+    sorted_alerts = sorted(alerts, key=lambda alert: _parse_timestamp_for_sort(alert.timestamp or ""))
+    filter_text = ", ".join(
+        f"{key}={value}" for key, value in filters.items()
+        if value not in (None, "", False)
+    ) or "none"
+
+    report_overview = [
+        ["exported_at", exported_at],
+        ["filter_used", filter_text],
+        ["requested_window_start", filters.get("from") or ""],
+        ["requested_window_end", filters.get("to") or ""],
+        ["actual_first_seen", sorted_alerts[0].timestamp if sorted_alerts else ""],
+        ["actual_last_seen", sorted_alerts[-1].timestamp if sorted_alerts else ""],
+        ["total_alerts", total],
+        ["false_positive_count", false_positive_count],
+        ["zero_day_count", zero_day_count],
+        ["actionable_alerts", actionable_count],
+    ]
+    if total == 0:
+        report_overview.append(["note", "No alerts matched this export filter"])
+
+    severity_counts = Counter(item["severity"] for item in records)
+    severity_summary = [
+        [severity, count, _percentage(count, total)]
+        for severity, count in sorted(
+            severity_counts.items(),
+            key=lambda item: (-SEVERITY_RANK.get(item[0], 0), item[0]),
+        )
+    ]
+
+    family_counts = Counter(item["family"] for item in records)
+    family_summary = [
+        [family, count, _percentage(count, total)]
+        for family, count in sorted(family_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    by_src = defaultdict(list)
+    by_dst = defaultdict(list)
+    by_endpoint = defaultdict(list)
+    for item in records:
+        alert = item["alert"]
+        by_src[alert.src_ip or "N/A"].append(item)
+        by_dst[alert.dst_ip or "N/A"].append(item)
+        by_endpoint[item["endpoint"]].append(item)
+
+    def group_sort_key(items):
+        return (-len(items), -max(item["risk"] for item in items), _max_severity([item["alert"] for item in items]))
+
+    top_sources = []
+    for src_ip, items in sorted(by_src.items(), key=lambda pair: group_sort_key(pair[1]))[:10]:
+        alerts_in_group = [item["alert"] for item in items]
+        top_sources.append([
+            src_ip,
+            len(items),
+            len({alert.dst_ip or "N/A" for alert in alerts_in_group}),
+            _mode(item["family"] for item in items),
+            _max_severity(alerts_in_group),
+            max(item["risk"] for item in items),
+        ])
+
+    top_targets = []
+    for dst_ip, items in sorted(by_dst.items(), key=lambda pair: group_sort_key(pair[1]))[:10]:
+        alerts_in_group = [item["alert"] for item in items]
+        top_targets.append([
+            dst_ip,
+            len(items),
+            len({alert.src_ip or "N/A" for alert in alerts_in_group}),
+            _mode(item["family"] for item in items),
+            _max_severity(alerts_in_group),
+            max(item["risk"] for item in items),
+        ])
+
+    repeated_endpoints = []
+    repeated_groups = [
+        (endpoint, items)
+        for endpoint, items in by_endpoint.items()
+        if len(items) >= 3
+    ]
+    for endpoint, items in sorted(repeated_groups, key=lambda pair: group_sort_key(pair[1])):
+        src_ip, dst_ip, dst_port, protocol = endpoint
+        alerts_in_group = sorted(
+            [item["alert"] for item in items],
+            key=lambda alert: _parse_timestamp_for_sort(alert.timestamp or ""),
+        )
+        repeated_endpoints.append([
+            src_ip,
+            dst_ip,
+            dst_port,
+            protocol,
+            len(items),
+            alerts_in_group[0].timestamp if alerts_in_group else "",
+            alerts_in_group[-1].timestamp if alerts_in_group else "",
+            _max_severity(alerts_in_group),
+            max(item["risk"] for item in items),
+        ])
+
+    priority_items = sorted(
+        [item for item in records if not item["alert"].is_false_positive],
+        key=lambda item: (
+            item["risk"],
+            _parse_timestamp_for_sort(item["alert"].timestamp or ""),
+        ),
+        reverse=True,
+    )[:15]
+    priority_incidents = []
+    for rank, item in enumerate(priority_items, start=1):
+        alert = item["alert"]
+        priority_incidents.append([
+            rank,
+            alert.alert_id,
+            alert.timestamp,
+            item["severity"],
+            item["family"],
+            alert.attack_type or "Unknown",
+            item["risk"],
+            alert.src_ip or "N/A",
+            alert.dst_ip or "N/A",
+            alert.dst_port or "N/A",
+            item["action_code"],
+        ])
+
+    return {
+        "report_overview": report_overview,
+        "severity_summary": severity_summary,
+        "family_summary": family_summary,
+        "top_sources": top_sources,
+        "top_targets": top_targets,
+        "repeated_endpoints": repeated_endpoints,
+        "priority_incidents": priority_incidents,
+        "action_legend": [[code, description] for code, description in ACTION_LEGEND.items()],
+    }
 
 
 @router.get("")
@@ -207,7 +377,7 @@ async def export_alerts_csv(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Export stored alerts with analytical fields for FYP/security review."""
+    """Export a sectioned alert summary CSV for FYP/security review."""
     _require_export_role(user)
     alerts = (
         _base_alert_query(
@@ -218,60 +388,96 @@ async def export_alerts_csv(
         .all()
     )
 
-    src_counts = Counter(a.src_ip or "N/A" for a in alerts)
-    dst_counts = Counter(a.dst_ip or "N/A" for a in alerts)
-    attack_counts = Counter(a.attack_type or "Unknown" for a in alerts)
-    endpoint_counts = Counter(_endpoint_pair(a) for a in alerts)
-
     exported_at = datetime.now(timezone.utc).isoformat()
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=CSV_HEADERS, lineterminator="\n")
-    writer.writeheader()
+    filters = {
+        "from": from_,
+        "to": to,
+        "severity": severity,
+        "attack_type": attack_type,
+        "include_false_positive": include_false_positive,
+        "zero_day_only": zero_day_only,
+    }
+    summaries = _build_alert_summaries(alerts, filters, exported_at)
 
-    for alert in alerts:
-        date, hour = _split_timestamp(alert.timestamp or "")
-        endpoint = _endpoint_pair(alert)
-        repeat_count_endpoint = endpoint_counts[endpoint]
-        family = _attack_family(alert.attack_type or "")
-        severity_value = (alert.severity or "low").lower()
-        risk = _risk_score(alert, repeat_count_endpoint)
-        writer.writerow({
-            "exported_at": exported_at,
-            "analysis_window_start": from_ or "",
-            "analysis_window_end": to or "",
-            "alert_id": alert.alert_id,
-            "timestamp": alert.timestamp,
-            "date": date,
-            "hour": hour,
-            "attack_type": alert.attack_type,
-            "attack_family": family,
-            "severity": severity_value,
-            "severity_rank": SEVERITY_RANK.get(severity_value, 1),
-            "confidence": alert.confidence,
-            "confidence_pct": alert.confidence_pct,
-            "risk_score": risk,
-            "src_ip": alert.src_ip or "N/A",
-            "dst_ip": alert.dst_ip or "N/A",
-            "dst_port": alert.dst_port or "N/A",
-            "protocol": alert.protocol or "N/A",
-            "endpoint_pair": endpoint,
-            "is_zero_day": "Yes" if alert.is_zero_day else "No",
-            "is_false_positive": "Yes" if alert.is_false_positive else "No",
-            "review_status": "False Positive" if alert.is_false_positive else "Needs Review",
-            "repeat_count_src_ip": src_counts[alert.src_ip or "N/A"],
-            "repeat_count_dst_ip": dst_counts[alert.dst_ip or "N/A"],
-            "repeat_count_attack_type": attack_counts[alert.attack_type or "Unknown"],
-            "repeat_count_endpoint_pair": repeat_count_endpoint,
-            "recommended_action": _recommended_action(alert, family, repeat_count_endpoint, risk),
-            "analysis_note": _analysis_note(alert, family, repeat_count_endpoint, risk),
-        })
+    output = StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    _write_csv_section(writer, "Report Overview", ["metric", "value"], summaries["report_overview"])
+    if alerts:
+        _write_csv_section(writer, "Severity Summary", ["severity", "count", "percentage"], summaries["severity_summary"])
+        _write_csv_section(writer, "Attack Family Summary", ["attack_family", "count", "percentage"], summaries["family_summary"])
+        _write_csv_section(writer, "Top Sources", ["src_ip", "alert_count", "unique_targets", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_sources"])
+        _write_csv_section(writer, "Top Targets", ["dst_ip", "alert_count", "unique_sources", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_targets"])
+        _write_csv_section(writer, "Repeated Endpoint Pairs", ["src_ip", "dst_ip", "dst_port", "protocol", "count", "first_seen", "last_seen", "max_severity", "max_risk_score"], summaries["repeated_endpoints"])
+        _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "dst_port", "action_code"], summaries["priority_incidents"])
+        _write_csv_section(writer, "Action Legend", ["action_code", "explanation"], summaries["action_legend"])
 
     filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return Response(
-        content=output.getvalue(),
+        content="\ufeff" + output.getvalue(),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f'attachment; filename="alerts_analysis_{filename_ts}.csv"'
+            "Content-Disposition": f'attachment; filename="alerts_summary_{filename_ts}.csv"'
+        },
+    )
+
+
+@router.get("/export_raw.csv")
+async def export_raw_alerts_csv(
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    severity: Optional[str] = None,
+    attack_type: Optional[str] = None,
+    include_false_positive: bool = True,
+    zero_day_only: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Export a raw flat alert list CSV containing all DB fields."""
+    _require_export_role(user)
+    alerts = (
+        _base_alert_query(
+            db, severity, attack_type, include_false_positive,
+            zero_day_only, from_, to
+        )
+        .order_by(AlertDB.timestamp.asc(), AlertDB.id.asc())
+        .all()
+    )
+
+    output = StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    
+    # Headers
+    headers = [
+        "id", "alert_id", "timestamp", "attack_type", "src_ip", "dst_ip", 
+        "dst_port", "protocol", "severity", "confidence", "confidence_pct", 
+        "is_false_positive", "is_zero_day"
+    ]
+    writer.writerow(headers)
+    
+    for alert in alerts:
+        row = [
+            alert.id,
+            alert.alert_id,
+            alert.timestamp,
+            alert.attack_type,
+            alert.src_ip,
+            alert.dst_ip,
+            alert.dst_port,
+            alert.protocol,
+            alert.severity,
+            alert.confidence,
+            alert.confidence_pct,
+            "Yes" if alert.is_false_positive else "No",
+            "Yes" if alert.is_zero_day else "No",
+        ]
+        writer.writerow([_csv_safe(cell) for cell in row])
+
+    filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="alerts_raw_{filename_ts}.csv"'
         },
     )
 

@@ -23,7 +23,12 @@ from app.core.pipeline import (
 )
 from app.core.datasets import DATASET_CICIDS2017, dataset_display_name
 from app.schemas import SettingsUpdate
-from app.state import _state, save_runtime_settings
+from app.state import (
+    DEFAULT_ALERT_THRESHOLD,
+    DEFAULT_ZERO_DAY_THRESHOLD,
+    _state,
+    save_runtime_settings,
+)
 from app.routers.auth import get_current_user
 
 router = APIRouter(tags=["dashboard"])
@@ -47,6 +52,8 @@ async def system_status(user=Depends(get_current_user)):
         "dataset_display": dataset_display_name(dataset_type),
         "packet_count":   _state["packet_count"],
         "anomaly_count":  _state["anomaly_count"],
+        "threshold":      float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
         "antibody_count": nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0,
         "server_time":    datetime.utcnow().isoformat(),
     }
@@ -120,6 +127,7 @@ async def model_summary(user=Depends(get_current_user)):
 @router.patch("/api/settings")
 async def update_settings(settings: SettingsUpdate, user=Depends(get_current_user)):
     """Update runtime settings (active model, alert threshold)."""
+    changed = False
     if settings.active_model is not None:
         if settings.active_model not in ("nsa", "isolation_forest"):
             raise HTTPException(status_code=400, detail="Invalid active_model")
@@ -134,11 +142,31 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
                 raise HTTPException(status_code=400, detail="Isolation Forest model is not trained")
 
         _state["active_model"] = settings.active_model
+        changed = True
+
+    if settings.threshold is not None:
+        threshold = float(settings.threshold)
+        if not 0.10 <= threshold <= 0.90:
+            raise HTTPException(status_code=400, detail="threshold must be between 0.10 and 0.90")
+        _state["threshold"] = threshold
+        changed = True
+
+    if settings.zero_day_threshold is not None:
+        zero_day_threshold = float(settings.zero_day_threshold)
+        if not 0.30 <= zero_day_threshold <= 0.95:
+            raise HTTPException(status_code=400, detail="zero_day_threshold must be between 0.30 and 0.95")
+        _state["zero_day_threshold"] = zero_day_threshold
+        changed = True
+
+    if changed:
         save_runtime_settings()
+
     return {
         "success": True,
         "active_model": _state["active_model"],
         "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
+        "threshold": float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
     }
 
 

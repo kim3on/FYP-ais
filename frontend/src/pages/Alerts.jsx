@@ -7,6 +7,7 @@ import {
   getBlockedIPs,
   clearAlerts,
   exportAlertsCSV as exportAlertsAnalysisCSV,
+  exportRawAlertsCSV,
 } from '../api';
 import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
@@ -132,6 +133,28 @@ export default function Alerts() {
     }
   }
 
+  async function exportRawAlerts() {
+    if (filtered.length === 0) return;
+    try {
+      const params = {};
+      if (filter === 'critical' || filter === 'high') params.severity = filter;
+      if (filter === 'zero-day') params.zero_day_only = true;
+
+      const { blob, filename } = await exportRawAlertsCSV(params);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export raw alerts:", err);
+      alert(err.message || 'Failed to export raw alerts');
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-header flex justify-between items-center">
@@ -219,7 +242,10 @@ export default function Alerts() {
                 Clear
               </button>
               <button className="btn btn-primary" style={{fontSize:'11px',padding:'5px 12px'}} onClick={exportAlertsCSV} disabled={filtered.length===0}>
-                ↓ Export CSV
+                ↓ Export Summary
+              </button>
+              <button className="btn btn-primary" style={{fontSize:'11px',padding:'5px 12px'}} onClick={exportRawAlerts} disabled={filtered.length===0}>
+                ↓ Export Raw Alerts
               </button>
             </div>
           </div>

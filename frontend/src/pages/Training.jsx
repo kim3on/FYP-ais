@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { startTraining, getTrainingLogs, getTrainingResult } from '../api';
 import { useApp } from '../hooks/useApp';
 import '../components/Layout/Layout.css';
+import { initializeNotificationSound, playCompletionSound } from '../utils/notificationSound';
 
 export default function Training() {
   const [file, setFile]         = useState(null);
@@ -33,6 +34,11 @@ export default function Training() {
 
   async function handleTrain() {
     if (!file) { setError('Please select a dataset file first.'); return; }
+    const confirmed = window.confirm(
+      `Start training with "${file.name}"?\n\nThis may take a while and will replace the current trained model.`
+    );
+    if (!confirmed) return;
+    initializeNotificationSound();
     setError(''); setLoading(true); setResult(null); clearTrainingLog();
     pushLog('[INFO] Starting training pipeline…');
 
@@ -49,9 +55,11 @@ export default function Training() {
         console.error("Failed to fetch training result:", err);
       }
       refreshStatus();
+      playCompletionSound('success');
     } catch (err) {
       pushLog(`[ERR] ${err.message}`);
       setError(err.message);
+      playCompletionSound('error');
     } finally {
       clearInterval(pollRef.current);
       setLoading(false);

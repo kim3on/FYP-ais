@@ -32,6 +32,7 @@ const NAV = [
 export default function Sidebar({ isOpen, onToggle }) {
   const { currentUser, user, logout } = useAuth();
   const { alerts, theme, setTheme } = useApp();
+
   const unread = alerts.filter(a => !a.is_false_positive).length;
   const displayName = currentUser?.profile?.display_name || currentUser?.username || user || 'Admin';
   const role = currentUser?.role || 'Network Admin';

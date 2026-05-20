@@ -19,6 +19,8 @@ import json
 
 
 SETTINGS_PATH = Path(__file__).parent / "artefacts" / "runtime_settings.json"
+DEFAULT_ALERT_THRESHOLD = 0.50
+DEFAULT_ZERO_DAY_THRESHOLD = 0.65
 
 
 def _load_runtime_settings() -> dict:
@@ -38,9 +40,18 @@ def save_runtime_settings() -> None:
     data = {
         "active_model": _state.get("active_model", "nsa"),
         "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
+        "threshold": float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
     }
     with SETTINGS_PATH.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def _runtime_float(name: str, default: float) -> float:
+    try:
+        return float(_runtime_settings.get(name, default))
+    except (TypeError, ValueError):
+        return default
 
 
 _runtime_settings = _load_runtime_settings()
@@ -53,6 +64,8 @@ try:
     )
 except ValueError:
     _initial_active_dataset_type = DATASET_CICIDS2017
+_initial_threshold = _runtime_float("threshold", DEFAULT_ALERT_THRESHOLD)
+_initial_zero_day_threshold = _runtime_float("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)
 
 
 # ── In-memory state ──────────────────────────────────────────────────────
@@ -63,6 +76,8 @@ _state: dict = {
     "last_result":    None,
     "active_model":   _initial_active_model,  # "nsa" or "isolation_forest"
     "active_dataset_type": _initial_active_dataset_type,
+    "threshold":      _initial_threshold,
+    "zero_day_threshold": _initial_zero_day_threshold,
     "packet_count":   0,
     "anomaly_count":  0,
     # Live capture
@@ -97,4 +112,6 @@ def _build_engine(dataset_type: str | None = None) -> DetectionEngine:
         active_model=_state["active_model"],
         self_boundary=raw_sb,
         pca_self_boundary=pca_sb,
+        threshold=float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        zero_day_threshold=float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
     )

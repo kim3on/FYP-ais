@@ -13,6 +13,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str
+
+
+
 class UserProfileUpdate(BaseModel):
     display_name: Optional[str] = None
     email: Optional[str] = None
@@ -38,4 +45,5 @@ class TrainConfig(BaseModel):
 
 class SettingsUpdate(BaseModel):
     active_model: Optional[str] = None
-    alert_threshold: Optional[str] = None
+    threshold: Optional[float] = None
+    zero_day_threshold: Optional[float] = None
