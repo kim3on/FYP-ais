@@ -19,7 +19,7 @@ Implementation
 - At inference, computes a z-score per feature per sample.
 - A feature is "violated" when |z| > threshold.
 - Rare BENIGN violations receive higher weight, producing a continuous
-  weighted self-boundary score for benign-calibrated fusion.
+  weighted self-boundary score for supporting AIS alert evidence.
 - Returns a violation ratio, continuous anomaly score, and
   human-readable evidence strings.
 
@@ -250,7 +250,7 @@ class SelfBoundaryDetector:
         return violation_ratios, anomaly_flags, evidence
 
     def weighted_score(self, df: pd.DataFrame) -> np.ndarray:
-        """Return continuous self-boundary anomaly scores for fusion."""
+        """Return continuous self-boundary anomaly scores for evidence."""
         self._check_fitted()
         X = self._aligned_array(df)
         return self._score_details(X)["weighted_scores"].astype(np.float64)
@@ -258,7 +258,7 @@ class SelfBoundaryDetector:
     def calibrate_weighted_threshold(
         self,
         df_benign: pd.DataFrame,
-        target_fpr: float = 0.05,
+        target_fpr: float = 0.10,
     ) -> dict:
         """Calibrate weighted self-boundary threshold from BENIGN rows only."""
         self._check_fitted()

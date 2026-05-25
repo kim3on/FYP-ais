@@ -425,9 +425,49 @@ def test_nsa_detectors_dont_match_self():
         assert dists.min() >= det_r - 1e-6, \
             f"V-Detector {i} overlaps self: min_dist={dists.min():.4f} < radius={det_r:.4f}"
 
+def test_nsa_pure_threshold_calibration_controls_final_rule():
+    X_self = np.zeros((10, 1), dtype=np.float32)
+    X_cal = np.arange(10, dtype=np.float32).reshape(-1, 1)
+    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=0, max_attempts=0)
+    nsa.fit(X_self)
+    info = nsa.calibrate_threshold(X_cal, target_fpr=0.2)
+    labels = nsa.predict(X_cal)
+    assert info["score_mode"] == "self_gap_distance"
+    assert info["decision_rule"] == "v_detector_match OR self_distance > threshold"
+    assert info["target_achieved"] is True
+    assert labels.mean() <= 0.2
+
+def test_nsa_detector_match_is_forced_positive_without_fusion():
+    X_self = np.zeros((10, 1), dtype=np.float32)
+    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=0, max_attempts=0)
+    nsa.fit(X_self)
+    nsa.score_threshold_ = 10.0
+    nsa.score_scale_ = 15.0
+    nsa.detectors_ = np.array([[5.0]], dtype=np.float32)
+    nsa.det_radii_ = np.array([1.0], dtype=np.float64)
+    nsa._det_sq_ = (nsa.detectors_ * nsa.detectors_).sum(axis=1)
+    labels, scores = nsa.predict_with_scores(np.array([[5.0]], dtype=np.float32))
+    assert labels[0] == 1
+    assert scores[0] > 0.0
+
+def test_nsa_calibration_reports_unachievable_detector_fpr():
+    X_self = np.zeros((10, 1), dtype=np.float32)
+    X_cal = np.arange(10, dtype=np.float32).reshape(-1, 1)
+    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=0, max_attempts=0)
+    nsa.fit(X_self)
+    nsa.detectors_ = np.array([[0.0]], dtype=np.float32)
+    nsa.det_radii_ = np.array([100.0], dtype=np.float64)
+    nsa._det_sq_ = (nsa.detectors_ * nsa.detectors_).sum(axis=1)
+    info = nsa.calibrate_threshold(X_cal, target_fpr=0.1)
+    assert info["target_achieved"] is False
+    assert info["detector_match_fpr"] > info["target_fpr"]
+
 test("NSA — V-Detector fits on CIC-IDS-2017 with variable radii",  test_nsa_on_cicids_features)
 test("NSA — predict_with_scores shape and bounds",                  test_nsa_predict_shape)
 test("NSA — no V-detector sphere overlaps with self (core property)", test_nsa_detectors_dont_match_self)
+test("NSA — pure threshold calibration controls final rule",        test_nsa_pure_threshold_calibration_controls_final_rule)
+test("NSA — detector match is forced positive without fusion",      test_nsa_detector_match_is_forced_positive_without_fusion)
+test("NSA — calibration reports unachievable detector FPR",         test_nsa_calibration_reports_unachievable_detector_fpr)
 
 
 # ════════════════════════════════════════════════════════════
@@ -480,7 +520,7 @@ test("IsoForest — benign-calibrated threshold available", test_iso_benign_cali
 # ════════════════════════════════════════════════════════════
 print("\n── 4. Evaluator ────────────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
-from app.core.evaluator import evaluate_model, compare_models, severity_from_score
+from app.core.evaluator import evaluate_model, compare_models, severity_from_score, threshold_analysis
 from app.core.calibration import conformal_threshold
 from app.models.self_boundary import SelfBoundaryDetector
 
@@ -503,6 +543,37 @@ def test_severity_mapping():
     assert severity_from_score(0.80) == 'high'
     assert severity_from_score(0.60) == 'medium'
     assert severity_from_score(0.30) == 'low'
+
+def test_threshold_analysis_recall_first_10pct_fpr_cap():
+    y_true = np.array([0] * 20 + [1] * 5)
+    scores = np.array(
+        list(range(20)) + [18.0, 18.0, 21.0, 21.0, 21.0],
+        dtype=float,
+    )
+    result = threshold_analysis(y_true, scores, model_name="threshold cap test", max_rows=200)
+    rec = result["recommended"]
+    assert result["target_fpr_range"] == [0.0, 0.1]
+    assert rec["false_positive_rate"] <= 0.1
+    assert rec["recall"] == 1.0
+    assert "10%" in result["recommendation_reason"]
+    assert "6%" not in result["recommendation_reason"]
+
+def test_threshold_analysis_respects_forced_positive_mask():
+    y_true = np.array([0, 0, 0, 1])
+    scores = np.array([0.0, 0.0, 0.0, 10.0])
+    forced = np.array([True, False, False, False])
+    result = threshold_analysis(
+        y_true,
+        scores,
+        model_name="forced mask test",
+        max_rows=5,
+        target_fpr=(0.0, 0.5),
+        forced_positive_mask=forced,
+    )
+    rec = result["recommended"]
+    assert result["forced_positive_count"] == 1
+    assert rec["recall"] == 1.0
+    assert rec["false_positive_rate"] >= 0.3333
 
 def test_conformal_threshold_known_rank():
     scores = np.array([0.0, 1.0, 2.0, 3.0])
@@ -553,6 +624,8 @@ def test_self_boundary_legacy_gaussian_compat():
 
 test("Evaluator — per-category stats with CIC-IDS-2017 labels", test_evaluator_cicids_categories)
 test("Evaluator — severity score thresholds correct",            test_severity_mapping)
+test("Evaluator — threshold analysis prefers recall under 10% FPR cap", test_threshold_analysis_recall_first_10pct_fpr_cap)
+test("Evaluator — threshold analysis respects forced positives", test_threshold_analysis_respects_forced_positive_mask)
 test("Calibration — conformal threshold rank is deterministic",  test_conformal_threshold_known_rank)
 test("Self-Boundary — quantile fences and strict threshold",      test_self_boundary_quantile_fences_and_strict_threshold)
 test("Self-Boundary — fallback ratio uses strict threshold",      test_self_boundary_ratio_fallback_uses_strict_threshold)
@@ -581,22 +654,23 @@ def test_pipeline_cicids():
     for key in ('accuracy', 'false_positive_rate'):
         assert 0.0 <= result['nsa_eval'][key] <= 1.0, \
             f"metric '{key}' out of range: {result['nsa_eval'][key]}"
-    assert result['validation_mode'] == 'strict_unsupervised_benign_fusion_calibrated'
-    assert result['calibration_summary']['score_mode'] == 'weighted_fusion'
+    assert result['validation_mode'] == 'strict_unsupervised_benign_pure_nsa_calibrated'
+    assert result['calibration_summary']['score_mode'] == 'self_gap_distance'
+    assert result['calibration_summary']['decision_rule'] == 'v_detector_match OR self_distance > threshold'
     assert 'calibration_reliability' in result['calibration_summary']
     assert 'calibration_reliability' in result['nsa_calibration_summary']
     assert 'calibration_reliability' in result['iso_calibration_summary']
     assert result['iso_calibration_summary']['mode'] == 'unsupervised_benign_isolation_forest'
     assert result['iso_summary']['threshold_calibration']['decision_rule'] == 'raw_anomaly_score > threshold'
     assert 'calibration_reliability' in result['self_boundary_calibration_summary']
-    assert result['self_boundary_mode'] == 'hybrid_pca_scoring_raw_evidence'
+    assert result['self_boundary_mode'] == 'evidence_only_pca_raw'
     assert result['raw_self_boundary_summary']['status'] == 'fitted'
     assert result['pca_self_boundary_summary']['status'] == 'fitted'
     assert result['pca_self_boundary_summary']['score_mode'] == 'weighted_feature_violation'
     assert result['pca_self_boundary_summary']['n_features_modelled'] == result['nsa_summary']['n_features']
     assert 'calibration_reliability' in result['pca_self_boundary_calibration_summary']
     assert 'calibration_reliability' in result['raw_self_boundary_calibration_summary']
-    assert 'fusion_calibration' in result['nsa_summary']
+    assert result['nsa_summary']['fusion_calibration']['score_mode'] == 'disabled'
     assert result['sb_summary']['score_mode'] == 'weighted_feature_violation'
     assert result['sb_summary']['boundary_mode'] == 'quantile_fence'
     assert result['nsa_eval']['labelled_attack_metrics_applicable'] is False
@@ -611,6 +685,10 @@ def test_pipeline_cicids():
     labelled = result['post_run_labelled_verification']
     assert labelled['available'] is True
     assert labelled['threshold_analysis']['verification_only'] is True
+    assert labelled['threshold_analysis']['target_fpr_range'] == [0.0, 0.1]
+    assert 'forced_positive_count' in labelled['threshold_analysis']
+    if labelled['threshold_analysis']['target_achieved']:
+        assert labelled['threshold_analysis']['recommended']['false_positive_rate'] <= 0.1
     assert labelled['source_decomposition']['available'] is True
     iso_labelled = result['iso_post_run_labelled_verification']
     assert iso_labelled['available'] is True
@@ -654,7 +732,7 @@ def test_pipeline_nsl_kdd_separate_artifacts():
 
     assert result["dataset_type"] == "nsl_kdd"
     assert result["validation_stats"]["dataset"] == "NSL-KDD"
-    assert result["validation_mode"] == "strict_unsupervised_benign_fusion_calibrated"
+    assert result["validation_mode"] == "strict_unsupervised_benign_pure_nsa_calibrated"
     assert result["post_run_labelled_verification"]["available"] is True
     assert models_ready("nsl_kdd") is True
     assert os.path.exists(paths.preprocessor)
@@ -703,14 +781,18 @@ def test_detection_result_structure():
     assert 'threshold_analysis' in result
     assert result['threshold_analysis']['verification_only'] is True
     assert 'recommended' in result['threshold_analysis']
+    assert result['threshold_analysis']['target_fpr_range'] == [0.0, 0.1]
+    assert result['threshold_analysis']['forced_positive_count'] == result['source_decomposition']['overlaps']['D']
+    if result['threshold_analysis']['target_achieved']:
+        assert result['threshold_analysis']['recommended']['false_positive_rate'] <= 0.1
     assert result['source_decomposition']['available'] is True
     assert result['source_verification']['available'] is True
-    assert 'pca_self_boundary' in result['layer1_sources']
-    assert 'raw_self_boundary_evidence' in result['layer1_sources']
     assert 'v_detector' in result['layer1_sources']
     assert 'self_gap' in result['layer1_sources']
-    assert result['score_mode'] == 'weighted_fusion_pca_self_boundary'
-    assert result['self_boundary_mode'] == 'hybrid_pca_scoring_raw_evidence'
+    assert 'score_fusion' not in result['layer1_sources']
+    assert result['detection_architecture'] == 'pure_nsa_v_detector_self_gap'
+    assert result['score_mode'] == 'self_gap_distance'
+    assert result['self_boundary_mode'] == 'evidence_only_pca_raw'
     assert 'anomaly_sources_summary' in result
 
     live_sample = pd.read_csv(io.BytesIO(_make_cicids_csv(n_benign=1, n_attack=0))).iloc[0].to_dict()
@@ -726,6 +808,7 @@ def test_detection_result_structure():
     )
     assert offset_result['total_checked'] == 10
     assert offset_result['row_offset'] == 20
+    assert offset_result['trained_target_fpr'] == 0.1
 
     print(f"\n    Detected {result['anomalies_found']} anomalies in 30 samples")
 
@@ -741,9 +824,7 @@ def test_detection_alert_fields():
                 'confidence_pct', 'is_false_positive', 'anomaly_sources'}
     valid_sev = {'critical', 'high', 'medium', 'low'}
     valid_sources = {
-        'v_detector', 'self_gap', 'pca_self_boundary', 'self_boundary',
-        'raw_self_boundary_evidence', 'score_fusion', 'nsa_pca',
-        'isolation_forest',
+        'v_detector', 'self_gap', 'isolation_forest',
     }
 
     for alert in result['alerts']:
@@ -785,6 +866,9 @@ def test_detection_nsl_kdd_batch_result():
     assert result["total_checked"] == 30
     assert "threshold_analysis" in result
     assert result["threshold_analysis"]["verification_only"] is True
+    assert result["threshold_analysis"]["target_fpr_range"] == [0.0, 0.1]
+    if result["threshold_analysis"]["target_achieved"]:
+        assert result["threshold_analysis"]["recommended"]["false_positive_rate"] <= 0.1
     for alert in result["alerts"]:
         assert alert["src_ip"] == "N/A"
         assert alert["attack_type"] in {"Unknown Anomaly", "Zero-Day Candidate"}
@@ -1119,7 +1203,7 @@ test("CICFlow mode — CIC-compatible emits terminal TCP flows",  test_cicflow_m
 print("\n── 9. Runtime Settings ────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 
-def test_settings_update_persists_thresholds_without_real_artifact_write():
+def test_settings_update_keeps_runtime_alert_threshold_neutral_when_disabled():
     import asyncio
     import json
     import tempfile
@@ -1141,15 +1225,18 @@ def test_settings_update_persists_thresholds_without_real_artifact_write():
                 SettingsUpdate(threshold=0.35, zero_day_threshold=0.75),
                 user=object(),
             ))
-            assert result["threshold"] == 0.35
+            assert result["threshold"] == 0.50
+            assert result["runtime_alert_threshold_enabled"] is False
             assert result["zero_day_threshold"] == 0.75
 
             status = asyncio.run(system_status(user=object()))
-            assert status["threshold"] == 0.35
+            assert status["threshold"] == 0.50
+            assert status["runtime_alert_threshold_enabled"] is False
             assert status["zero_day_threshold"] == 0.75
 
             saved = json.loads(state_module.SETTINGS_PATH.read_text(encoding="utf-8"))
-            assert saved["threshold"] == 0.35
+            assert saved["threshold"] == 0.50
+            assert saved["runtime_alert_threshold_enabled"] is False
             assert saved["zero_day_threshold"] == 0.75
 
             try:
@@ -1203,7 +1290,7 @@ def test_zero_day_threshold_is_runtime_configurable():
     assert engine._attribute_attack(neutral_flow, novelty_score=0.70) == "Unknown Anomaly"
     assert engine._attribute_attack(neutral_flow, novelty_score=0.80) == "Zero-Day Candidate"
 
-test("Settings — thresholds persist and invalid values reject", test_settings_update_persists_thresholds_without_real_artifact_write)
+test("Settings — runtime alert threshold stays neutral when disabled", test_settings_update_keeps_runtime_alert_threshold_neutral_when_disabled)
 test("NSA — runtime threshold gates detector matches",          test_nsa_runtime_threshold_gates_detector_match_alerts)
 test("Detection — zero-day threshold is runtime configurable",  test_zero_day_threshold_is_runtime_configurable)
 

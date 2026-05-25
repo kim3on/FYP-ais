@@ -3,8 +3,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useApp }  from '../../hooks/useApp';
 import './Sidebar.css';
 
-// Dynamic accessibility person icon (arms outstretched — no emoji)
-const AccessibilityIcon = () => (
+// Help centre icon (arms outstretched — no emoji)
+const HelpCentreIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <circle cx="12" cy="3.5" r="2"/>
     <path d="M18.5 8H5.5a.5.5 0 0 0 0 1H11v3.5l-2.8 5.1a.5.5 0 0 0 .88.48L12 13.2l2.92 4.88a.5.5 0 1 0 .88-.48L13 12.5V9h5.5a.5.5 0 0 0 0-1z"/>
@@ -26,7 +26,7 @@ const NAV = [
   { to: '/train',          icon: '⚙',                  label: 'Train & Detect' },
   { to: '/alerts',         icon: '◈',                  label: 'Alerts'         },
   { to: '/settings',       icon: '◎',                  label: 'Settings'       },
-  { to: '/accessibility',  icon: <AccessibilityIcon />, label: 'Accessibility'  },
+  { to: '/help-centre',    icon: <HelpCentreIcon />,    label: 'Help Centre'    },
 ];
 
 export default function Sidebar({ isOpen, onToggle }) {

@@ -19,12 +19,6 @@ const MODELS = [
   },
 ];
 
-const ALERT_PRESETS = [
-  { label: 'Low', value: 0.35 },
-  { label: 'Medium', value: 0.5 },
-  { label: 'High', value: 0.75 },
-];
-
 const ZERO_DAY_PRESETS = [
   { label: 'Low', value: 0.45 },
   { label: 'Medium', value: 0.65 },
@@ -97,7 +91,6 @@ export default function Settings() {
   const [systemStatus, setSystemStatus] = useState(null);
   const [modelInfo, setModelInfo]   = useState(null);
   const [saving, setSaving]         = useState(false);
-  const [threshold, setThreshold]   = useState(0.5);
   const [zdThreshold, setZdThreshold] = useState(0.65);
   const [saved, setSaved]           = useState(false);
   const [error, setError]           = useState('');
@@ -107,7 +100,6 @@ export default function Settings() {
     getSystemStatus().then(s => {
       setSystemStatus(s);
       if (s.active_model) setActiveModel(s.active_model);
-      if (s.threshold != null) setThreshold(Number(s.threshold));
       if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
     }).catch(err => {
       console.error("Failed to fetch system status:", err);
@@ -120,7 +112,7 @@ export default function Settings() {
   async function handleSave() {
     const model = MODELS.find(m => m.id === activeModel);
     const confirmed = window.confirm(
-      `Save detection settings?\n\nActive model: ${model?.name || activeModel}\nAlert threshold: ${threshold.toFixed(2)}\nZero-day threshold: ${zdThreshold.toFixed(2)}`
+      `Save detection settings?\n\nActive model: ${model?.name || activeModel}\nZero-day threshold: ${zdThreshold.toFixed(2)}`
     );
     if (!confirmed) return;
     setError(''); setSaved(false);
@@ -128,17 +120,14 @@ export default function Settings() {
     try {
       const result = await updateSettings({
         active_model: activeModel,
-        threshold,
         zero_day_threshold: zdThreshold,
       });
       if (result.active_model) setActiveModel(result.active_model);
-      if (result.threshold != null) setThreshold(Number(result.threshold));
       if (result.zero_day_threshold != null) setZdThreshold(Number(result.zero_day_threshold));
       setSaved(true);
       await refreshStatus();
       getSystemStatus().then(s => {
         setSystemStatus(s);
-        if (s.threshold != null) setThreshold(Number(s.threshold));
         if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
       }).catch(err => {
         console.error("Failed to refresh system status:", err);
@@ -226,33 +215,6 @@ export default function Settings() {
 
         <SettingSection icon={<BellIcon />} tone="success" title="Alert Configurations">
           <div className="settings-grid two">
-            <FieldBlock label="Alert Threshold">
-              <div className="settings-preset-row">
-                {ALERT_PRESETS.map(preset => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    className={`settings-preset ${Math.abs(threshold - preset.value) < 0.01 ? 'active' : ''}`}
-                    onClick={() => setThreshold(preset.value)}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-              <div className="settings-range-row">
-                <span>Anomaly Threshold</span>
-                <strong>{threshold.toFixed(2)}</strong>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="0.9"
-                  step="0.05"
-                  value={threshold}
-                  onChange={e => setThreshold(+parseFloat(e.target.value).toFixed(2))}
-                />
-              </div>
-            </FieldBlock>
-
             <FieldBlock label="Zero-Day Candidate Threshold">
               <div className="settings-preset-row">
                 {ZERO_DAY_PRESETS.map(preset => (

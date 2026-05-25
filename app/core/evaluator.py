@@ -307,8 +307,8 @@ def source_decomposition_metrics(
     """
     Report labelled source-level recall/FPR for AIS decision regions.
 
-    D = mature V-detector match, G = self-gap, F = fused-score threshold,
-    P = PCA-space self-boundary, R = raw-feature self-boundary evidence.
+    D = mature V-detector match, G = self-gap, F = legacy fused-score slot,
+    P = PCA-space self-boundary evidence, R = raw-feature self-boundary evidence.
     Labels are expected to be used only after prediction for verification.
     """
     y_true = np.asarray(y_true).astype(int)
@@ -391,8 +391,8 @@ def source_decomposition_metrics(
         "legend": {
             "D": "mature V-detector match",
             "G": "self-gap fallback",
-            "F": "fused-score threshold",
-            "P": "PCA-space self-boundary threshold",
+            "F": "legacy fused-score threshold (disabled for pure NSA)",
+            "P": "PCA-space self-boundary evidence",
             "R": "raw-feature self-boundary evidence",
         },
     }
@@ -485,7 +485,8 @@ def threshold_analysis(
     model_name: str = "model",
     max_rows: int = 41,
     target_recall: tuple[float, float] = (0.92, 0.97),
-    target_fpr: tuple[float, float] = (0.03, 0.06),
+    target_fpr: tuple[float, float] = (0.0, 0.10),
+    forced_positive_mask: np.ndarray | None = None,
 ) -> dict:
     """
     Evaluate how score thresholds affect labelled post-run verification metrics.
@@ -495,10 +496,13 @@ def threshold_analysis(
     """
     y_true = np.asarray(y_true).astype(int)
     scores = np.asarray(anomaly_scores, dtype=float)
-    if len(y_true) != len(scores) or len(scores) == 0:
+    forced = None
+    if forced_positive_mask is not None:
+        forced = np.asarray(forced_positive_mask, dtype=bool)
+    if len(y_true) != len(scores) or len(scores) == 0 or (forced is not None and len(forced) != len(scores)):
         return {
             "available": False,
-            "reason": "Threshold analysis requires aligned labels and anomaly scores.",
+            "reason": "Threshold analysis requires aligned labels, anomaly scores, and forced-positive mask.",
             "table": [],
             "recommended": None,
         }
@@ -506,6 +510,10 @@ def threshold_analysis(
     finite_mask = np.isfinite(scores)
     y_true = y_true[finite_mask]
     scores = scores[finite_mask]
+    if forced is None:
+        forced = np.zeros(len(scores), dtype=bool)
+    else:
+        forced = forced[finite_mask]
     if len(scores) == 0:
         return {
             "available": False,
@@ -534,7 +542,7 @@ def threshold_analysis(
     thresholds = np.unique(np.quantile(scores, quantiles))
     rows = []
     for threshold in thresholds:
-        y_pred = (scores > threshold).astype(int)
+        y_pred = (forced | (scores > threshold)).astype(int)
         metrics = evaluate_model(y_true, y_pred, model_name).to_dict()
         rows.append({
             "threshold": round(float(threshold), 6),
@@ -554,43 +562,31 @@ def threshold_analysis(
     recall_low, recall_high = target_recall
     fpr_low, fpr_high = target_fpr
 
-    ideal = [
-        row for row in rows
-        if row["recall"] >= recall_low
-        and fpr_low <= row["false_positive_rate"] <= fpr_high
-    ]
-    fpr_band = [
-        row for row in rows
-        if fpr_low <= row["false_positive_rate"] <= fpr_high
-    ]
+    def pct_label(value: float) -> str:
+        pct = value * 100
+        return f"{pct:.0f}%" if pct.is_integer() else f"{pct:.1f}%"
+
     fpr_capped = [
         row for row in rows
         if row["false_positive_rate"] <= fpr_high
+    ]
+    ideal = [
+        row for row in fpr_capped
+        if row["recall"] >= recall_low
     ]
 
     if ideal:
         recommended = max(ideal, key=lambda r: (r["recall"], r["f1"], -r["false_positive_rate"]))
         target_achieved = True
-        reason = "Meets the requested Recall and FPR target bands."
-    elif fpr_band:
-        recommended = max(fpr_band, key=lambda r: (r["recall"], r["f1"], -r["false_negative_rate"]))
-        target_achieved = False
-        reason = "FPR is inside the target band, but Recall is outside the requested range."
+        reason = f"Selected highest Recall with FPR <= {pct_label(fpr_high)}; requested Recall target is also met."
     elif fpr_capped:
         recommended = max(fpr_capped, key=lambda r: (r["recall"], r["f1"], -r["false_positive_rate"]))
         target_achieved = False
-        reason = "No threshold hits the full target; selected highest Recall with FPR <= 6%."
+        reason = f"Selected highest Recall with FPR <= {pct_label(fpr_high)}."
     else:
-        def band_distance(row):
-            recall = row["recall"]
-            fpr = row["false_positive_rate"]
-            recall_gap = 0.0 if recall >= recall_low else abs(recall - recall_low)
-            fpr_gap = 0.0 if fpr_low <= fpr <= fpr_high else min(abs(fpr - fpr_low), abs(fpr - fpr_high))
-            return recall_gap + fpr_gap
-
-        recommended = min(rows, key=lambda r: (band_distance(r), r["false_negative_rate"], r["false_positive_rate"]))
+        recommended = min(rows, key=lambda r: (r["false_positive_rate"], -r["recall"], -r["f1"]))
         target_achieved = False
-        reason = "No threshold meets the acceptable FPR cap; selected closest observed tradeoff."
+        reason = f"No threshold meets FPR <= {pct_label(fpr_high)}; selected lowest observed FPR tradeoff."
 
     return {
         "available": True,
@@ -602,6 +598,7 @@ def threshold_analysis(
         "recommendation_reason": reason,
         "recommended": recommended,
         "table": rows,
+        "forced_positive_count": int(forced.sum()),
         "note": (
             "Report-only threshold analysis. Labels are used after detection to evaluate tradeoffs; "
             "the trained unsupervised model threshold is not changed."

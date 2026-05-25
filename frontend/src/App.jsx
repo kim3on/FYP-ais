@@ -10,7 +10,7 @@ const TrainDetect = lazy(() => import('./pages/TrainDetect'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Account = lazy(() => import('./pages/Account'));
-const Accessibility = lazy(() => import('./pages/Accessibility'));
+const HelpCentre = lazy(() => import('./pages/HelpCentre'));
 const Users = lazy(() => import('./pages/Users'));
 
 function CatchAll() {
@@ -61,7 +61,7 @@ export default function App() {
                   <Route path="settings" element={<Settings />} />
                   <Route path="account"       element={<Account />} />
                   <Route path="users"         element={<Users />} />
-                  <Route path="accessibility" element={<Accessibility />} />
+                  <Route path="help-centre" element={<HelpCentre />} />
                 </Route>
                 <Route path="*" element={<CatchAll />} />
               </Routes>

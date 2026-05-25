@@ -20,6 +20,7 @@ from app.core.pipeline import (
     MIN_BENIGN_ROWS_HARD,
     MIN_TRAINING_DETECTORS,
     TrainingPipeline,
+    load_nsa,
     result_path,
 )
 from app.core.datasets import DATASET_CICIDS2017, DATASET_NSL_KDD, normalize_dataset_type
@@ -44,7 +45,7 @@ async def train(
     contamination:  float = 0.05,
     test_size:      float = 0.2,
     n_pca_components: int | None = 25,
-    target_fpr:     float = 0.05,
+    target_fpr:     float = 0.10,
     benign_row_limit: int | None = 20_000,
     dataset_type:    str = DATASET_CICIDS2017,
 ):
@@ -58,6 +59,7 @@ async def train(
       max_detectors  — max mature V-detectors        (default 3 000)
       max_attempts   — max candidate gen attempts    (default 100 000)
       contamination  — IsoForest contamination       (default 0.05)
+      target_fpr     — target benign false-positive rate for calibration (default 0.10)
       test_size      — train/test split fraction     (default 0.2)
     """
     if _state["status"] == "learning":
@@ -134,6 +136,7 @@ async def train(
             "test_size":     _test_size,
             "n_pca_components": _n_pca,
             "benign_row_limit": _benign_row_limit,
+            "target_fpr": _target_fpr,
             "dataset_type": _dataset_type,
         },
     }
@@ -153,11 +156,47 @@ async def training_result(dataset_type: str | None = None):
         dataset_type is None
         or _state["last_result"].get("dataset_type") == normalize_dataset_type(selected)
     ):
-        return _state["last_result"]
+        return _sync_repaired_nsa_calibration(_state["last_result"], selected)
 
     path = result_path(selected)
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
+            return _sync_repaired_nsa_calibration(json.load(f), selected)
 
     raise HTTPException(status_code=404, detail="No training result available yet")
+
+
+def _sync_repaired_nsa_calibration(result: dict, dataset_type: str | None) -> dict:
+    """Reflect runtime repair of old pathological NSA thresholds in result JSON."""
+    if not isinstance(result, dict):
+        return result
+
+    try:
+        nsa = load_nsa(normalize_dataset_type(dataset_type))
+        summary = nsa.summary() if nsa else {}
+    except Exception:
+        return result
+
+    calibration = summary.get("calibration") or {}
+    if not calibration.get("repair_note"):
+        return result
+
+    synced = dict(result)
+    nsa_summary = dict(synced.get("nsa_summary") or {})
+    nsa_summary["score_threshold"] = summary.get("score_threshold")
+    nsa_summary["calibration"] = calibration
+    synced["nsa_summary"] = nsa_summary
+
+    for key in ("calibration_summary", "nsa_calibration_summary"):
+        existing = synced.get(key)
+        if isinstance(existing, dict):
+            patched = dict(existing)
+            patched.update({
+                "threshold": calibration.get("threshold"),
+                "score_scale": calibration.get("score_scale"),
+                "target_achieved": calibration.get("target_achieved"),
+                "repair_note": calibration.get("repair_note"),
+            })
+            synced[key] = patched
+
+    return synced

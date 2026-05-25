@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { getUsers, createUser, deleteUser } from '../api';
@@ -28,14 +28,7 @@ export default function Users() {
     return roleLower.includes('administrator') || roleLower === 'admin';
   }, [currentUser]);
 
-  // Fetch users on mount
-  useEffect(() => {
-    if (isAdmin) {
-      fetchUsers();
-    }
-  }, [isAdmin]);
-
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -46,7 +39,17 @@ export default function Users() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Fetch users on mount
+  useEffect(() => {
+    if (isAdmin) {
+      const timer = window.setTimeout(() => {
+        fetchUsers();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [fetchUsers, isAdmin]);
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -98,6 +101,20 @@ export default function Users() {
     return 'badge zero-day'; // Iris/Purple accent
   };
 
+  // Calculate high-level metrics for bento cards
+  const stats = useMemo(() => {
+    const total = users.length;
+    const admins = users.filter(u => {
+      const r = (u.role || '').toLowerCase();
+      return r.includes('administrator') || r === 'admin';
+    }).length;
+    return {
+      total,
+      admins,
+      analysts: total - admins
+    };
+  }, [users]);
+
   // ── Render Access Denied View ──────────────────────────────────────────
   if (!isAdmin) {
     return (
@@ -120,20 +137,6 @@ export default function Users() {
       </div>
     );
   }
-
-  // Calculate high-level metrics for bento cards
-  const stats = useMemo(() => {
-    const total = users.length;
-    const admins = users.filter(u => {
-      const r = (u.role || '').toLowerCase();
-      return r.includes('administrator') || r === 'admin';
-    }).length;
-    return {
-      total,
-      admins,
-      analysts: total - admins
-    };
-  }, [users]);
 
   // ── Render User Management View ─────────────────────────────────────────
   return (

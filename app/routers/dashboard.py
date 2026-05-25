@@ -26,6 +26,7 @@ from app.schemas import SettingsUpdate
 from app.state import (
     DEFAULT_ALERT_THRESHOLD,
     DEFAULT_ZERO_DAY_THRESHOLD,
+    RUNTIME_ALERT_THRESHOLD_ENABLED,
     _state,
     save_runtime_settings,
 )
@@ -52,7 +53,12 @@ async def system_status(user=Depends(get_current_user)):
         "dataset_display": dataset_display_name(dataset_type),
         "packet_count":   _state["packet_count"],
         "anomaly_count":  _state["anomaly_count"],
-        "threshold":      float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        "threshold":      float(
+            _state.get("threshold", DEFAULT_ALERT_THRESHOLD)
+            if RUNTIME_ALERT_THRESHOLD_ENABLED
+            else DEFAULT_ALERT_THRESHOLD
+        ),
+        "runtime_alert_threshold_enabled": RUNTIME_ALERT_THRESHOLD_ENABLED,
         "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
         "antibody_count": nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0,
         "server_time":    datetime.utcnow().isoformat(),
@@ -148,7 +154,7 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
         threshold = float(settings.threshold)
         if not 0.10 <= threshold <= 0.90:
             raise HTTPException(status_code=400, detail="threshold must be between 0.10 and 0.90")
-        _state["threshold"] = threshold
+        _state["threshold"] = threshold if RUNTIME_ALERT_THRESHOLD_ENABLED else DEFAULT_ALERT_THRESHOLD
         changed = True
 
     if settings.zero_day_threshold is not None:
@@ -165,7 +171,12 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
         "success": True,
         "active_model": _state["active_model"],
         "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
-        "threshold": float(_state.get("threshold", DEFAULT_ALERT_THRESHOLD)),
+        "threshold": float(
+            _state.get("threshold", DEFAULT_ALERT_THRESHOLD)
+            if RUNTIME_ALERT_THRESHOLD_ENABLED
+            else DEFAULT_ALERT_THRESHOLD
+        ),
+        "runtime_alert_threshold_enabled": RUNTIME_ALERT_THRESHOLD_ENABLED,
         "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
     }
 

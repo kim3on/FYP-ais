@@ -83,10 +83,14 @@ async def detect(
             engine = _build_engine(_dataset_type)
             dlog(f"[DETECT] Dataset: {_dataset_type}")
             dlog(f"[DETECT] Model: {_state['active_model'].upper()}")
+            dlog(f"[DETECT] Trained target FPR: {engine.trained_target_fpr * 100:.1f}%")
             dlog("[DETECT] Loading and preprocessing file...")
 
             result = engine.detect_from_csv(
-                dataset_bytes, limit=_limit, offset=_offset, filename=upload_filename
+                dataset_bytes,
+                limit=_limit,
+                offset=_offset,
+                filename=upload_filename,
             )
 
             _state["alerts"].extend(result["alerts"])

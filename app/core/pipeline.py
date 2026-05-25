@@ -93,7 +93,7 @@ class TrainingPipeline:
         test_size: float = 0.2,
         random_state: int = 42,
         n_pca_components: float | int | None = 0.95,
-        target_fpr: float = 0.05,
+        target_fpr: float = 0.10,
         benign_row_limit: int | None = 20_000,
         dataset_type: str = DATASET_CICIDS2017,
     ):
@@ -250,7 +250,7 @@ class TrainingPipeline:
             f"(z-threshold={raw_sb.z_threshold}, min-violations={raw_sb.min_violations_ratio:.0%})."
         )
 
-        log("[SB] Training PCA-space Self-Boundary detector for fused AIS scoring...")
+        log("[SB] Training PCA-space Self-Boundary detector for supporting evidence...")
         X_train_pca_df = preprocessor.pca_dataframe(X_train)
         X_cal_pca_df = preprocessor.pca_dataframe(X_cal)
         X_test_pca_df = preprocessor.pca_dataframe(X_test)
@@ -262,7 +262,7 @@ class TrainingPipeline:
         pca_sb.fit(X_train_pca_df, pca_feature_columns)
         log(
             f"[OK] PCA Self-Boundary fitted: {pca_sb.n_features_} PCA components modelled "
-            "(used for final score fusion)."
+            "(used for supporting evidence)."
         )
 
         # ── 5. TRAIN NSA ───────────────────────────────────────────────
@@ -312,7 +312,6 @@ class TrainingPipeline:
         )
 
         log("[INFO] Calibrating PCA self-boundary on BENIGN calibration rows...")
-        pca_sb_cal_scores = pca_sb.weighted_score(X_cal_pca_df)
         pca_sb_calibration = pca_sb.calibrate_weighted_threshold(
             X_cal_pca_df,
             target_fpr=self.target_fpr,
@@ -329,24 +328,8 @@ class TrainingPipeline:
             f"(observed FPR {pca_sb_calibration['observed_fpr'] * 100:.2f}%)."
         )
 
-        log("[INFO] Calibrating fused AIS score on BENIGN calibration rows only...")
-        fusion_calibration = nsa.calibrate_fusion(
-            X_cal,
-            self_boundary_scores=pca_sb_cal_scores,
-            target_fpr=self.target_fpr,
-        )
-        if fusion_calibration.get("calibration_reliability") == "experimental":
-            warning = (
-                "Fused AIS calibration reliability is experimental because the "
-                "benign calibration sample is small."
-            )
-            training_warnings.append(warning)
-            log(f"[WARN] {warning}")
-        log(
-            f"[OK] Fused AIS threshold: {fusion_calibration['threshold']:.6f} "
-            f"(target FPR {fusion_calibration['target_fpr'] * 100:.2f}%, "
-            f"observed {fusion_calibration['observed_fpr'] * 100:.2f}%)."
-        )
+        calibration_summary = nsa_calibration
+        log("[INFO] Weighted fusion disabled: final AIS decision is V-detector OR calibrated self-gap.")
 
         # ── 6. TRAIN ISOLATION FOREST ──────────────────────────────────
         log("[INFO] Training Isolation Forest baseline on BENIGN rows only...")
@@ -378,15 +361,9 @@ class TrainingPipeline:
         nsa_labels, _ = nsa.predict_with_scores(X_test)
         iso_labels, _ = iso.predict_with_scores(X_test)
 
-        # Evaluate fused AIS score on benign test rows.
-        pca_sb_test_scores = pca_sb.weighted_score(X_test_pca_df)
-        fused_labels, _, _ = nsa.predict_fused(
-            X_test,
-            self_boundary_scores=pca_sb_test_scores,
-        )
+        # Evaluate pure NSA on benign test rows. Self-Boundary is evidence only.
         test_components = nsa.decision_components(
             X_test,
-            self_boundary_scores=pca_sb_test_scores,
         )
         _, pca_sb_test_flags, _ = pca_sb.score(X_test_pca_df)
         _, raw_sb_test_flags, _ = raw_sb.score(df_test_features[preprocessor.feature_columns_])
@@ -395,23 +372,21 @@ class TrainingPipeline:
 
         y_test = np.zeros(len(X_test), dtype=int)
         nsa_result = evaluate_model(y_test, nsa_labels, "AIS (NSA)", df_test_meta)
-        fused_result = evaluate_model(y_test, fused_labels, "AIS (Fused NSA + Self-Boundary)", df_test_meta)
         iso_result = evaluate_model(y_test, iso_labels, "Isolation Forest", df_test_meta)
-        nsa_silhouette = compute_silhouette_metric(X_test, fused_labels, random_state=self.random_state)
+        nsa_silhouette = compute_silhouette_metric(X_test, nsa_labels, random_state=self.random_state)
         iso_silhouette = compute_silhouette_metric(X_test, iso_labels, random_state=self.random_state)
-        self_intrusion_rate = fused_result.false_positive_rate
+        self_intrusion_rate = nsa_result.false_positive_rate
         benign_source_decomposition = source_decomposition_metrics(
             y_test,
             test_components,
         )
 
         log(
-            f"[OK] NSA-only benign FPR: {nsa_result.false_positive_rate:.4f} | "
-            f"Fused AIS benign FPR: {fused_result.false_positive_rate:.4f} | "
+            f"[OK] Pure NSA benign FPR: {nsa_result.false_positive_rate:.4f} | "
             f"ISO benign FPR: {iso_result.false_positive_rate:.4f}"
         )
         log(
-            f"[OK] AIS Self Intrusion Rate (combined): {self_intrusion_rate * 100:.2f}% "
+            f"[OK] AIS Self Intrusion Rate (pure NSA): {self_intrusion_rate * 100:.2f}% "
             "(benign validation flagged as anomaly)."
         )
         sir_assessment = assess_metric("self_intrusion_rate", self_intrusion_rate)
@@ -446,14 +421,9 @@ class TrainingPipeline:
             )
             X_label_eval, df_label_meta = preprocessor.transform_df(df_label_eval_raw)
             X_label_pca_df = preprocessor.pca_dataframe(X_label_eval)
-            pca_sb_label_scores = pca_sb.weighted_score(X_label_pca_df)
-            label_pred, _, label_raw_scores = nsa.predict_fused(
-                X_label_eval,
-                self_boundary_scores=pca_sb_label_scores,
-            )
+            label_pred, _, label_raw_scores = nsa.predict_with_details(X_label_eval)
             label_components = nsa.decision_components(
                 X_label_eval,
-                self_boundary_scores=pca_sb_label_scores,
             )
             _, pca_sb_label_flags, _ = pca_sb.score(X_label_pca_df)
             raw_label_features = preprocessor.clean_feature_frame(df_label_eval_raw)
@@ -472,7 +442,7 @@ class TrainingPipeline:
             labelled_metrics = evaluate_model(
                 y_label_true,
                 label_pred.astype(int),
-                "AIS (Fused NSA + Self-Boundary) labelled verification",
+                "AIS (Pure NSA) labelled verification",
                 df_label_meta,
             ).to_dict()
             labelled_metrics["available"] = True
@@ -486,6 +456,8 @@ class TrainingPipeline:
                 y_label_true,
                 label_raw_scores,
                 model_name="AIS labelled threshold analysis",
+                target_fpr=(0.0, self.target_fpr),
+                forced_positive_mask=label_components.get("v_detector_match"),
             )
             labelled_metrics["source_decomposition"] = source_decomposition_metrics(
                 y_label_true,
@@ -518,6 +490,7 @@ class TrainingPipeline:
                 y_label_true,
                 iso_label_raw_scores,
                 model_name="Isolation Forest baseline threshold analysis",
+                target_fpr=(0.0, self.target_fpr),
             )
             iso_labelled_metrics["verification_note"] = (
                 "Isolation Forest is an unsupervised BENIGN-only baseline. Labels "
@@ -531,7 +504,7 @@ class TrainingPipeline:
                 f"FPR={labelled_metrics.get('false_positive_rate')}"
             )
 
-        comparison = compare_models([fused_result, iso_result])
+        comparison = compare_models([nsa_result, iso_result])
 
         # ── 8. SAVE ARTEFACTS ──────────────────────────────────────────
         log("[INFO] Saving trained models to disk...")
@@ -548,7 +521,7 @@ class TrainingPipeline:
         log("[SYSTEM] Status: LEARNING -> ACTIVE")
 
         nsa_only_eval = nsa_result.to_dict()
-        nsa_eval = fused_result.to_dict()
+        nsa_eval = nsa_result.to_dict()
         nsa_eval["labelled_attack_metrics_applicable"] = False
         nsa_eval["training_metric_note"] = (
             "Benign-only training validation has no attack class; precision, recall, F1, "
@@ -586,16 +559,16 @@ class TrainingPipeline:
             "iso_eval":         iso_eval,
             "comparison":       comparison,
             "validation_stats": val_stats,
-            "validation_mode":   "strict_unsupervised_benign_fusion_calibrated",
+            "validation_mode":   "strict_unsupervised_benign_pure_nsa_calibrated",
             "benign_row_limit": self.benign_row_limit,
             "benign_rows_available": benign_rows_available,
             "benign_rows_used": int(len(df_benign)),
             "training_warnings": training_warnings,
-            "calibration_summary": fusion_calibration,
-            "calibration_reliability": fusion_calibration.get("calibration_reliability"),
+            "calibration_summary": calibration_summary,
+            "calibration_reliability": calibration_summary.get("calibration_reliability"),
             "nsa_calibration_summary": nsa_calibration,
             "iso_calibration_summary": iso_calibration,
-            "self_boundary_mode": "hybrid_pca_scoring_raw_evidence",
+            "self_boundary_mode": "evidence_only_pca_raw",
             "self_boundary_calibration_summary": pca_sb_calibration,
             "pca_self_boundary_calibration_summary": pca_sb_calibration,
             "raw_self_boundary_calibration_summary": raw_sb_calibration,
@@ -619,13 +592,13 @@ class TrainingPipeline:
             },
             "source_decomposition": benign_source_decomposition,
             "metric_explanations": METRIC_EXPLANATIONS,
-            "detection_architecture": "two_layer_ais_score_fusion_pca_boundary",
+            "detection_architecture": "pure_nsa_v_detector_self_gap",
             "unsupervised_note": (
                 "Labels are used only to select BENIGN self rows and for reporting. "
                 "No attack labels are used to fit PCA/scaler, train detectors, "
-                "train self-boundary, calibrate fusion weights/scales, or tune thresholds. "
-                "PCA-space self-boundary is used for final scoring; raw-feature "
-                "self-boundary is retained only for alert evidence."
+                "train self-boundary, or tune thresholds. The final AIS decision is "
+                "a pure NSA rule: mature V-detector match OR calibrated self-gap. "
+                "Self-boundary models are retained only for alert evidence."
             ),
             "duration_seconds": round(duration, 2),
             "trained_at":       t0.isoformat(),

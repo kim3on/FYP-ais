@@ -2,6 +2,27 @@ import { useState, useCallback, useEffect } from 'react';
 import { getAlerts, getSystemStatus, getDashboardStats } from '../api';
 import { AppContext } from './AppContext.js';
 
+function loadStoredJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storeJson(key, value) {
+  try {
+    if (value == null) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch {
+    // Ignore storage quota/private-mode failures; runtime state still works.
+  }
+}
+
 export function AppProvider({ children }) {
   const [alerts, setAlerts]           = useState([]);
   const [systemStatus, setSystemStatus] = useState(null);
@@ -20,16 +41,35 @@ export function AppProvider({ children }) {
   const [trainFile, setTrainFile]       = useState(null);
   const [nDetectors, setND]             = useState(3000);
   const [benignRowLimit, setBenignRowLimit] = useState(20000);
-  const [rRadius, setR]                 = useState(0.30);
-  const [rsRadius, setRS]               = useState(0.03);
+  const [trainTargetFpr, setTrainTargetFpr] = useState(() => loadStoredJson('ais_train_target_fpr', 0.10));
   const [trainLogs, setTrainLogs]       = useState([]);
   const [trainResult, setTrainResult]   = useState(null);
 
   const [detectFile, setDetectFile]     = useState(null);
-  const [detectLimit, setDetectLimit]   = useState(1000);
-  const [detectOffset, setDetectOffset] = useState(0);
-  const [detectLogs, setDetectLogs]     = useState([]);
-  const [detectResult, setDetectResult] = useState(null);
+  const [detectLimit, setDetectLimit]   = useState(() => loadStoredJson('ais_detect_limit', 1000));
+  const [detectOffset, setDetectOffset] = useState(() => loadStoredJson('ais_detect_offset', 0));
+  const [detectLogs, setDetectLogs]     = useState(() => loadStoredJson('ais_detect_logs', []));
+  const [detectResult, setDetectResult] = useState(() => loadStoredJson('ais_detect_result', null));
+
+  useEffect(() => {
+    storeJson('ais_train_target_fpr', trainTargetFpr);
+  }, [trainTargetFpr]);
+
+  useEffect(() => {
+    storeJson('ais_detect_limit', detectLimit);
+  }, [detectLimit]);
+
+  useEffect(() => {
+    storeJson('ais_detect_offset', detectOffset);
+  }, [detectOffset]);
+
+  useEffect(() => {
+    storeJson('ais_detect_logs', detectLogs);
+  }, [detectLogs]);
+
+  useEffect(() => {
+    storeJson('ais_detect_result', detectResult);
+  }, [detectResult]);
 
   // Live session state (persists across tab changes)
   const CHART_LEN = 60;
@@ -109,7 +149,8 @@ export function AppProvider({ children }) {
       datasetType, setDatasetType,
       captureRunning, setCaptureRunning,
       theme, setTheme,
-      trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit, rRadius, setR, rsRadius, setRS,
+      trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit,
+      trainTargetFpr, setTrainTargetFpr,
       trainLogs, setTrainLogs, trainResult, setTrainResult,
       detectFile, setDetectFile, detectLimit, setDetectLimit, detectOffset, setDetectOffset,
       detectLogs, setDetectLogs, detectResult, setDetectResult,

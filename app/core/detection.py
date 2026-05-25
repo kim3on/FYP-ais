@@ -21,6 +21,7 @@ import uuid
 
 from app.core.datasets import DATASET_NSL_KDD, dataset_display_name, normalize_dataset_type
 from app.core.preprocessor import CICIDSPreprocessor
+from app.core.attack_attribution import attribute_attack
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
     compute_silhouette_metric,
@@ -107,6 +108,7 @@ class DetectionEngine:
         self.dataset_type = normalize_dataset_type(
             getattr(preprocessor, "dataset_type", None)
         )
+        self.trained_target_fpr = self._trained_target_fpr()
 
     # ------------------------------------------------------------------ #
     #  BATCH DETECTION (CSV upload)                                        #
@@ -164,43 +166,27 @@ class DetectionEngine:
         nsa_flags = None
         decision_components = None
 
-        if (
-            self._scoring_self_boundary() is not None
-            and df_raw is not None
-            and self._fusion_ready()
-        ):
+        if self._is_isolation_forest():
+            labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
+            min_dists = None
+            raw_scores = self._raw_anomaly_scores(X_pca, scores)
+        else:
             if self.self_boundary is not None:
                 sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
-            pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw)
-            labels, scores, raw_scores = self.model.predict_fused(
-                X_pca,
-                self_boundary_scores=pca_sb_scores,
-                alert_threshold=self.threshold,
-            )
+            if self._scoring_self_boundary() is not None and df_raw is not None:
+                pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw)
+            labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
+            raw_scores = np.asarray(min_dists, dtype=float)
             decision_components = self.model.decision_components(
                 X_pca,
-                self_boundary_scores=pca_sb_scores,
                 alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
             if decision_components is not None:
-                decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
+                if pca_sb_flags is not None:
+                    decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
                 if sb_flags is not None:
                     decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
-            min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
-            nsa_flags = self.model.predict(X_pca, alert_threshold=self.threshold) if hasattr(self.model, "predict") else None
-        else:
-            if hasattr(self.model, 'predict_with_details'):
-                labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
-            else:
-                labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
-                min_dists = None
-            raw_scores = self._raw_anomaly_scores(X_pca, scores)
-            decision_components = self.model.decision_components(
-                X_pca,
-                alert_threshold=self.threshold,
-            ) if hasattr(self.model, "decision_components") else None
-            if self.self_boundary is not None and df_raw is not None:
-                sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw)
+            nsa_flags = labels.astype(int)
 
         return self._build_result(
             labels,
@@ -236,37 +222,27 @@ class DetectionEngine:
         nsa_flags = None
         decision_components = None
         df_raw_single = self.preprocessor.clean_feature_frame(df_single)
-        if self._scoring_self_boundary() is not None and self._fusion_ready():
+        if self._is_isolation_forest():
+            labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
+            min_dists = None
+            raw_scores = self._raw_anomaly_scores(X_pca, scores)
+        else:
             if self.self_boundary is not None:
                 sb_ratios, sb_flags, sb_evidence = self.self_boundary.score(df_raw_single)
-            pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw_single)
-            labels, scores, raw_scores = self.model.predict_fused(
-                X_pca,
-                self_boundary_scores=pca_sb_scores,
-                alert_threshold=self.threshold,
-            )
+            if self._scoring_self_boundary() is not None:
+                pca_sb_scores, pca_sb_flags = self._score_scoring_self_boundary(X_pca, df_raw_single)
+            labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
+            raw_scores = np.asarray(min_dists, dtype=float)
             decision_components = self.model.decision_components(
                 X_pca,
-                self_boundary_scores=pca_sb_scores,
                 alert_threshold=self.threshold,
             ) if hasattr(self.model, "decision_components") else None
             if decision_components is not None:
-                decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
+                if pca_sb_flags is not None:
+                    decision_components["pca_self_boundary_match"] = np.asarray(pca_sb_flags, dtype=bool)
                 if sb_flags is not None:
                     decision_components["raw_self_boundary_evidence_match"] = np.asarray(sb_flags, dtype=bool)
-            min_dists = self.model._min_dist_to_self(X_pca) if hasattr(self.model, "_min_dist_to_self") else None
-            nsa_flags = self.model.predict(X_pca, alert_threshold=self.threshold) if hasattr(self.model, "predict") else None
-        else:
-            if hasattr(self.model, 'predict_with_details'):
-                labels, scores, min_dists = self.model.predict_with_details(X_pca, alert_threshold=self.threshold)
-            else:
-                labels, scores = self.model.predict_with_scores(X_pca, alert_threshold=self.threshold)
-                min_dists = None
-            raw_scores = self._raw_anomaly_scores(X_pca, scores)
-            decision_components = self.model.decision_components(
-                X_pca,
-                alert_threshold=self.threshold,
-            ) if hasattr(self.model, "decision_components") else None
+            nsa_flags = labels.astype(int)
 
         return self._build_result(
             labels,
@@ -333,16 +309,13 @@ class DetectionEngine:
                 anomaly_sources.append("isolation_forest")
                 v_detector_flagged = False
                 self_gap_flagged = False
-                fusion_flagged = False
             else:
-                # Check which NSA sub-mechanisms fired before final fusion.
+                # Check which pure-NSA sub-mechanisms fired.
                 v_detector_flagged = False
                 self_gap_flagged = False
-                fusion_flagged = False
                 if decision_components is not None:
                     v_detector_flagged = bool(decision_components.get("v_detector_match", [False])[i])
                     self_gap_flagged = bool(decision_components.get("self_gap_match", [False])[i])
-                    fusion_flagged = bool(decision_components.get("fusion_score_match", [False])[i])
                     nsa_flagged = bool(v_detector_flagged or self_gap_flagged or decision_components.get("nsa_score_match", [False])[i])
                 elif nsa_flags is not None and i < len(nsa_flags):
                     nsa_flagged = bool(nsa_flags[i] == 1)
@@ -364,25 +337,16 @@ class DetectionEngine:
                 if self_gap_flagged:
                     anomaly_sources.append("self_gap")
                 if not decision_components and nsa_flagged:
-                    anomaly_sources.append("nsa_pca")
+                    anomaly_sources.append("self_gap")
 
                 if pca_sb_flags is not None and i < len(pca_sb_flags) and pca_sb_flags[i]:
                     sb_flagged = True
-                    anomaly_sources.append(
-                        "pca_self_boundary"
-                        if self.pca_self_boundary is not None
-                        else "self_boundary"
-                    )
 
                 raw_sb_evidence_flagged = bool(sb_flags is not None and i < len(sb_flags) and sb_flags[i])
-                if raw_sb_evidence_flagged:
-                    anomaly_sources.append("raw_self_boundary_evidence")
-
-                if fusion_flagged and not v_detector_flagged and not self_gap_flagged:
-                    anomaly_sources.append("score_fusion")
+                sb_flagged = bool(sb_flagged or raw_sb_evidence_flagged)
 
                 if not anomaly_sources:
-                    anomaly_sources.append("score_fusion")
+                    anomaly_sources.append("self_gap")
 
             # ── Layer 2: Attack Attribution (NEVER uses labels) ─────────
             # The attack_category column is intentionally NOT passed here.
@@ -415,7 +379,7 @@ class DetectionEngine:
             if self_gap_flagged:
                 evidence.append("PCA NSA self-gap exceeded")
             if not self._is_isolation_forest() and not nsa_flagged and not sb_flagged:
-                evidence.append("Benign-calibrated AIS fusion threshold exceeded")
+                evidence.append("Benign-calibrated NSA self-gap threshold exceeded")
 
             alert = AlertRecord(
                 alert_id=str(uuid.uuid4())[:8].upper(),
@@ -457,17 +421,11 @@ class DetectionEngine:
             )
             self_boundary_mode = "not_applicable"
         else:
-            detection_architecture = "two_layer_ais_score_fusion_pca_boundary"
-            layer1_sources = ["v_detector", "self_gap", "score_fusion"] \
-                + (["pca_self_boundary"] if self.pca_self_boundary else []) \
-                + (["raw_self_boundary_evidence"] if self.self_boundary else [])
-            score_mode = (
-                "weighted_fusion_pca_self_boundary"
-                if self._scoring_self_boundary() is not None and self._fusion_ready()
-                else "model_score"
-            )
+            detection_architecture = "pure_nsa_v_detector_self_gap"
+            layer1_sources = ["v_detector", "self_gap"]
+            score_mode = "self_gap_distance"
             self_boundary_mode = (
-                "hybrid_pca_scoring_raw_evidence"
+                "evidence_only_pca_raw"
                 if self.pca_self_boundary is not None
                 else ("legacy_raw_scoring" if self.self_boundary is not None else "none")
             )
@@ -491,6 +449,7 @@ class DetectionEngine:
             "layer1_sources": layer1_sources,
             "score_mode": score_mode,
             "self_boundary_mode": self_boundary_mode,
+            "trained_target_fpr": round(float(self.trained_target_fpr), 6),
         }
         result["anomaly_sources_summary"] = self._count_sources(alerts)
         if silhouette is not None:
@@ -557,10 +516,15 @@ class DetectionEngine:
             )
 
         if raw_scores is not None and len(raw_scores) == len(labels):
+            forced_positive_mask = None
+            if not self._is_isolation_forest() and decision_components is not None:
+                forced_positive_mask = decision_components.get("v_detector_match")
             metrics["threshold_analysis"] = threshold_analysis(
                 y_true,
                 raw_scores,
                 model_name=f"{self.active_model} threshold analysis",
+                target_fpr=(0.0, self.trained_target_fpr),
+                forced_positive_mask=forced_positive_mask,
             )
         if decision_components is not None:
             source_metrics = source_decomposition_metrics(
@@ -570,6 +534,23 @@ class DetectionEngine:
             metrics["source_decomposition"] = source_metrics
             metrics["source_verification"] = source_metrics
         return metrics
+
+    def _trained_target_fpr(self) -> float:
+        """Return the benign calibration target saved in the active model."""
+        candidates = [
+            getattr(self.model, "target_fpr", None),
+            (getattr(self.model, "fusion_calibration_", None) or {}).get("target_fpr"),
+            (getattr(self.model, "threshold_calibration_", None) or {}).get("target_fpr"),
+            (getattr(self.model, "meta_", None) or {}).get("target_fpr"),
+            ((getattr(self.model, "meta_", None) or {}).get("threshold_calibration") or {}).get("target_fpr"),
+        ]
+        for value in candidates:
+            try:
+                if value is not None:
+                    return float(np.clip(float(value), 0.01, 0.20))
+            except (TypeError, ValueError):
+                continue
+        return 0.10
 
     def _raw_anomaly_scores(self, X_scaled: np.ndarray, confidence_scores: np.ndarray) -> np.ndarray:
         """
@@ -625,109 +606,12 @@ class DetectionEngine:
         Rule order matters: more specific signatures (brute force on known ports)
         MUST be checked BEFORE generic volumetric rules.
         """
-        # ── Helper shortcuts ─────────────────────────────────────────────
-        def g(keys, default=0):
-            return self._get(row, keys, default)
-
-        pkt_rate  = g(['Flow Packets/s', 'Flow Pkts/s', 'flow packets/s'])
-        byte_rate = g(['Flow Bytes/s', 'flow bytes/s'])
-        duration  = g(['Flow Duration', 'flow duration'])  # microseconds
-        fwd_pkts  = g(['Total Fwd Packets', 'Total Fwd Pkts'])
-        bwd_pkts  = g(['Total Backward Packets', 'Total Bwd Pkts', 'Total Bwd Packets'])
-        fwd_len   = g(['Fwd Packet Length Mean', 'Fwd Pkt Len Mean'])
-        bwd_len   = g(['Bwd Packet Length Mean', 'Bwd Pkt Len Mean'])
-        avg_size  = g(['Average Packet Size', 'Avg Fwd Segment Size'])
-        syn       = g(['SYN Flag Count', 'SYN Flag Cnt'])
-        ack       = g(['ACK Flag Count', 'ACK Flag Cnt'])
-        psh       = g(['PSH Flag Count', 'PSH Flag Cnt'])
-        rst       = g(['RST Flag Count', 'RST Flag Cnt'])
-        urg       = g(['URG Flag Count', 'URG Flag Cnt'])
-        fin       = g(['FIN Flag Count', 'FIN Flag Cnt'])
-        proto_raw = str(g(['Protocol', 'protocol'], '')).strip()
-        is_tcp    = proto_raw in ('6', 'TCP', 'tcp')
-        is_udp    = proto_raw in ('17', 'UDP', 'udp')
-
-        dst_port_raw = str(g(['Destination Port', 'dst_port'], ''))
-        _brute_ports = {'21': 'FTP', '22': 'SSH', '23': 'Telnet',
-                        '3389': 'RDP', '3306': 'MySQL', '5432': 'PostgreSQL',
-                        '445': 'SMB', '1433': 'MSSQL'}
-
-        # ── 1. Credential brute force (MUST come before volumetric rules) ─
-        # Patator / Hydra flows: TCP, targeting auth ports, small packets,
-        # bidirectional (server responds with auth challenge/reject).
-        if is_tcp and dst_port_raw in _brute_ports:
-            if fwd_pkts >= 3 and avg_size < 600:
-                return f'Brute Force — {_brute_ports[dst_port_raw]}'
-            if fwd_pkts > 20 and fwd_len < 300 and bwd_len < 300:
-                return f'Brute Force — {_brute_ports[dst_port_raw]}'
-
-        # Generic brute force (non-standard ports but small-packet pattern)
-        if is_tcp and fwd_pkts > 20 and fwd_len < 250 and bwd_len < 250 and psh > 10:
-            return 'Credential Brute Force'
-
-        # ── 2. Volumetric floods ──────────────────────────────────────
-        if pkt_rate > 10_000:
-            if is_udp:
-                return 'DDoS — UDP/ICMP Flood'
-            return 'DDoS — SYN Flood' if syn > ack else 'DDoS — TCP Flood'
-
-        if pkt_rate > 2_000 and is_tcp and byte_rate > 80_000:
-            return 'DoS — Hulk (High Rate)'
-
-        # ── 3. Slow / application-layer DoS ───────────────────────────
-        if duration > 300_000_000 and fwd_pkts < 100 and is_tcp:
-            return 'DoS — Slowloris'
-
-        if duration > 60_000_000 and psh > 5 and fwd_pkts < 200 and is_tcp:
-            return 'DoS — GoldenEye'
-
-        # ── 4. Scanning / reconnaissance ──────────────────────────────
-        if syn > 0 and fwd_pkts <= 3 and bwd_pkts == 0 and duration < 2_000_000:
-            return 'Port Scan — SYN Stealth'
-
-        if fwd_pkts <= 2 and bwd_pkts == 0 and duration < 500_000:
-            return 'Network Scan'
-
-        # ── 5. Web / application attacks ──────────────────────────────
-        if is_tcp and psh > 0 and bwd_len > 800 and fwd_pkts > 5 and fin > 0:
-            return 'Web Attack — Data Injection' if bwd_len > 5_000 else 'Web Attack — HTTP Exploit'
-
-        # ── 6. Covert / flag exploits ─────────────────────────────────
-        if urg > 0:
-            return 'TCP Exploit — URG Flag'
-
-        if rst > fwd_pkts * 0.5 and fwd_pkts > 5:
-            return 'TCP RST Injection'
-
-        # ── 7. Amplification (UDP reflection) ─────────────────────────
-        if is_udp and bwd_len > 1_000 and fwd_pkts <= 3:
-            return 'UDP Amplification Attack'
-
-        # ── 8. TLS exploitation ───────────────────────────────────────
-        if fwd_len < 50 and bwd_len > 5_000 and is_tcp and duration < 5_000_000:
-            return 'Heartbleed — TLS Exploit'
-
-        # ── 9. Covert data exfiltration ───────────────────────────────
-        if duration > 500_000_000 and pkt_rate < 50 and bwd_len > fwd_len * 3:
-            return 'Data Exfiltration'
-
-        # ── 10. Botnet C&C beacon ─────────────────────────────────────
-        if pkt_rate < 20 and duration > 30_000_000 and avg_size < 200:
-            return 'Botnet — C&C Beacon'
-
-        # ── 11. Slow attack fallback ──────────────────────────────────
-        if duration > 100_000_000 and pkt_rate < 200:
-            return 'DoS — Slow Attack'
-
-        # ════════════════════════════════════════════════════════════════
-        #  ZERO-DAY — high confidence, no known signature matched
-        # ════════════════════════════════════════════════════════════════
-        if zero_day_threshold is None:
-            zero_day_threshold = self.zero_day_threshold
-        if novelty_score >= float(zero_day_threshold):
-            return 'Zero-Day Candidate'
-
-        return 'Unknown Anomaly'
+        threshold = self.zero_day_threshold if zero_day_threshold is None else zero_day_threshold
+        return attribute_attack(
+            row,
+            novelty_score=novelty_score,
+            zero_day_threshold=threshold,
+        )
 
 
     @staticmethod
@@ -760,7 +644,7 @@ class DetectionEngine:
         return counts
 
     def _scoring_self_boundary(self):
-        """Return the SB model used for final score fusion."""
+        """Return the SB model used for supporting evidence."""
         return self.pca_self_boundary or self.self_boundary
 
     def _is_isolation_forest(self) -> bool:

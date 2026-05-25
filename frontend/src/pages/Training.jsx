@@ -11,8 +11,6 @@ export default function Training() {
   const [result, setResult]     = useState(null);
   const [error, setError]       = useState('');
   const [nDetectors, setNDetectors] = useState(500);
-  const [rRadius, setRRadius]   = useState(0.30);
-  const [rsRadius, setRSRadius] = useState(0.03);
   const { trainingLog, pushLog, clearTrainingLog, refreshStatus } = useApp();
   const logRef  = useRef(null);
   const pollRef = useRef(null);
@@ -45,7 +43,7 @@ export default function Training() {
     try {
       // Start polling logs every 2s
       pollRef.current = setInterval(pollLogs, 2000);
-      const data = await startTraining(file, { n_detectors: nDetectors, r: rRadius });
+      const data = await startTraining(file, { max_detectors: nDetectors });
       pushLog(`[OK] Training complete — ${data.message || 'Success'}`);
       // Fetch final result
       try {
@@ -115,18 +113,6 @@ export default function Training() {
                 <label>Number of Detectors — <span style={{color:'var(--accent)'}}>{nDetectors}</span></label>
                 <input type="range" min="100" max="2000" step="100" value={nDetectors}
                   onChange={e=>setNDetectors(+e.target.value)}
-                  style={{padding:0,cursor:'pointer',accentColor:'var(--accent)',width:'100%'}} />
-              </div>
-              <div>
-                <label>Self Gap Radius (r) — <span style={{color:'var(--accent)'}}>{rRadius}</span></label>
-                <input type="range" min="0.05" max="1.0" step="0.01" value={rRadius}
-                  onChange={e=>setRRadius(+parseFloat(e.target.value).toFixed(2))}
-                  style={{padding:0,cursor:'pointer',accentColor:'var(--accent)',width:'100%'}} />
-              </div>
-              <div>
-                <label>Detector Tolerance (r_s) — <span style={{color:'var(--accent)'}}>{rsRadius}</span></label>
-                <input type="range" min="0.01" max="0.2" step="0.01" value={rsRadius}
-                  onChange={e=>setRSRadius(+parseFloat(e.target.value).toFixed(2))}
                   style={{padding:0,cursor:'pointer',accentColor:'var(--accent)',width:'100%'}} />
               </div>
             </div>

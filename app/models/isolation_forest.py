@@ -115,7 +115,7 @@ class IsolationForestDetector:
     def calibrate_threshold(
         self,
         X_benign_calibration: np.ndarray,
-        target_fpr: float = 0.05,
+        target_fpr: float = 0.10,
     ) -> dict:
         """Calibrate the IF decision threshold from BENIGN rows only."""
         self._check_fitted()
