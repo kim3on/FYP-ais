@@ -5,7 +5,7 @@ Orchestrates the full training workflow:
   1. Load and preprocess the CIC-IDS-2017 dataset
   2. Train the NSA (AIS) model on NORMAL samples only
   3. Train the Self-Boundary detector on NORMAL raw features
-  4. Train the Isolation Forest baseline on all samples
+  4. Train the Isolation Forest baseline on BENIGN samples only
   5. Evaluate both models on the test portion
   6. Save trained artefacts and return a structured result
 
@@ -17,6 +17,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from uuid import uuid4
 from sklearn.model_selection import train_test_split
 
 from app.core.datasets import (
@@ -41,6 +42,7 @@ from app.core.evaluator import (
 from app.models.nsa import NegativeSelectionDetector
 from app.models.isolation_forest import IsolationForestDetector
 from app.models.self_boundary import SelfBoundaryDetector
+from app.core.training_runs import append_training_run_record, extract_training_run_record
 
 # ── Paths ────────────────────────────────────────────────────────────────
 _DEFAULT_PATHS  = artifact_paths(DATASET_CICIDS2017)
@@ -59,6 +61,8 @@ MIN_TRAINING_DETECTORS = 10
 MAX_TRAINING_DETECTORS = 10_000
 MAX_TRAINING_ATTEMPTS = 200_000
 MAX_BENIGN_ROW_LIMIT = 100_000
+MIN_ISO_ESTIMATORS = 50
+MAX_ISO_ESTIMATORS = 500
 
 
 class TrainingPipeline:
@@ -75,6 +79,8 @@ class TrainingPipeline:
         Maximum NSA candidate generation attempts.
     contamination : float
         Isolation Forest expected contamination fraction.
+    iso_n_estimators : int
+        Number of trees for the Isolation Forest baseline.
     test_size : float
         Fraction of data held out for evaluation.
     random_state : int
@@ -90,6 +96,7 @@ class TrainingPipeline:
         max_detectors: int = 3000,
         max_attempts: int = 100_000,
         contamination: float = 0.05,
+        iso_n_estimators: int = 100,
         test_size: float = 0.2,
         random_state: int = 42,
         n_pca_components: float | int | None = 0.95,
@@ -104,6 +111,7 @@ class TrainingPipeline:
         self.max_detectors = int(np.clip(max_detectors, MIN_TRAINING_DETECTORS, MAX_TRAINING_DETECTORS))
         self.max_attempts = int(np.clip(max_attempts, self.max_detectors, MAX_TRAINING_ATTEMPTS))
         self.contamination = float(np.clip(contamination, 0.001, 0.20))
+        self.iso_n_estimators = int(np.clip(iso_n_estimators, MIN_ISO_ESTIMATORS, MAX_ISO_ESTIMATORS))
         self.test_size = float(np.clip(test_size, 0.10, 0.40))
         self.random_state = random_state
         self.n_pca_components = n_pca_components
@@ -335,6 +343,7 @@ class TrainingPipeline:
         log("[INFO] Training Isolation Forest baseline on BENIGN rows only...")
         iso = IsolationForestDetector(
             contamination=self.contamination,
+            n_estimators=self.iso_n_estimators,
             random_state=self.random_state,
         )
         iso.fit(X_train)
@@ -546,6 +555,7 @@ class TrainingPipeline:
         iso_eval["silhouette"] = iso_silhouette
 
         result = {
+            "run_id":           str(uuid4()),
             "dataset_type":     self.dataset_type,
             "dataset_display":  dataset_display_name(self.dataset_type),
             "batch_only":       self.dataset_type == DATASET_NSL_KDD,
@@ -563,6 +573,26 @@ class TrainingPipeline:
             "benign_row_limit": self.benign_row_limit,
             "benign_rows_available": benign_rows_available,
             "benign_rows_used": int(len(df_benign)),
+            "feature_count": int(val_stats.get("n_features") or len(preprocessor.feature_columns_ or [])),
+            "pca_components": int(X_train.shape[1]) if len(X_train.shape) > 1 else None,
+            "split_sizes": {
+                "benign_train": int(len(X_train)),
+                "benign_calibration": int(len(X_cal)),
+                "benign_test": int(len(X_test)),
+                "attack_rows_available": int(len(df_attack_raw)),
+            },
+            "model_configs": {
+                "nsa": {
+                    "max_detectors": self.max_detectors,
+                    "max_attempts": self.max_attempts,
+                    "target_fpr": self.target_fpr,
+                },
+                "isolation_forest": {
+                    "contamination": self.contamination,
+                    "n_estimators": self.iso_n_estimators,
+                    "target_fpr": self.target_fpr,
+                },
+            },
             "training_warnings": training_warnings,
             "calibration_summary": calibration_summary,
             "calibration_reliability": calibration_summary.get("calibration_reliability"),
@@ -605,13 +635,17 @@ class TrainingPipeline:
         }
         result["nsa_summary"]["dataset_type"] = self.dataset_type
         result["nsa_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
+        result["nsa_summary"]["max_detectors"] = self.max_detectors
+        result["nsa_summary"]["max_attempts"] = self.max_attempts
         result["iso_summary"]["dataset_type"] = self.dataset_type
         result["iso_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
+        result["comparison_record"] = extract_training_run_record(result)
 
         # Persist result to disk for the dashboard to read on reload
         import json
         with open(self.paths.results, "w") as f:
             json.dump(result, f, indent=2)
+        append_training_run_record(result)
 
         return result
 
@@ -684,3 +718,21 @@ def models_ready(dataset_type: str | None = DATASET_CICIDS2017) -> bool:
     """Returns True if trained artefacts exist on disk for the dataset profile."""
     required = ["nsa", "iso", "preprocessor", "self_boundary"]
     return all(_first_existing_path(dataset_type, attr) for attr in required)
+
+
+def engine_ready(active_model: str | None = "nsa", dataset_type: str | None = DATASET_CICIDS2017) -> bool:
+    """Return True when the selected runtime engine can score flows."""
+    model_name = (active_model or "nsa").strip().lower()
+    try:
+        prep = load_preprocessor(dataset_type)
+        if prep is None:
+            return False
+        if model_name == "isolation_forest":
+            model = load_iso(dataset_type)
+        elif model_name == "nsa":
+            model = load_nsa(dataset_type)
+        else:
+            return False
+        return bool(model and getattr(model, "is_fitted_", False))
+    except Exception:
+        return False

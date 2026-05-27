@@ -115,6 +115,33 @@ export async function startTraining(file, params = {}) {
 }
 export async function getTrainingLogs()   { return apiFetch('/api/train/logs'); }
 export async function getTrainingResult() { return apiFetch('/api/train/result'); }
+export async function getTrainingRuns(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  return apiFetch(`/api/train/runs${query.toString() ? `?${query}` : ''}`);
+}
+export async function exportTrainingRunsCSV(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const url = `/api/train/runs/export.csv${query.toString() ? `?${query}` : ''}`;
+  const res = await fetch(url, { headers: authHeader() });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  return {
+    blob,
+    filename: match?.[1] || `training_runs_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+  };
+}
 
 // ── Detection ─────────────────────────────────────────────────
 export async function detectFromFile(file, limit, offset = 0, params = {}) {

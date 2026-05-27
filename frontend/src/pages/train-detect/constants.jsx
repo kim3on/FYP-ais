@@ -17,6 +17,7 @@ export const DATASET_OPTIONS = [
 
 export const METRIC_HELP = {
   'Active Antibodies': 'Number of mature NSA/V-detectors stored after benign-only training. More detectors can improve coverage but may increase runtime.',
+  'Isolation Trees': 'Number of Isolation Forest estimators stored after benign-only training.',
   'Unsupervised Benign Calibration': 'Normal pass rate on held-out benign calibration traffic. This is not attack accuracy; it checks how much benign traffic passes the unsupervised threshold.',
   'Current Dataset': 'Dataset profile currently loaded or trained for this page.',
   'Target FPR': 'Target false-positive rate used to calibrate the unsupervised threshold on benign calibration traffic only.',
@@ -28,6 +29,10 @@ export const METRIC_HELP = {
   'NSA Self-Gap Threshold': 'Saved unsupervised NSA self-gap distance cutoff calibrated from benign traffic only.',
   'Fitted Self-Gap Radius': 'NSA self-gap radius derived from benign PCA geometry during training.',
   'Fitted Detector Tolerance': 'V-detector self-tolerance derived from benign PCA geometry during training.',
+  'Contamination Prior': 'Isolation Forest sklearn prior. AIS-Detect still uses the benign-calibrated threshold for final decisions.',
+  'Trees / Estimators': 'Number of trees used by the Isolation Forest baseline.',
+  'IF Score Threshold': 'Saved Isolation Forest anomaly-score cutoff calibrated from benign traffic only.',
+  'Score Scale': 'Benign-calibrated score scale used to normalize Isolation Forest confidence.',
   'Total Flows': 'Number of flows analysed in this detection run.',
   'Anomalies': 'Number of flows flagged as anomalies by the unsupervised detector.',
   'Zero-Day Candidates': 'Anomaly alerts that do not match a known detector explanation strongly enough and are treated as unknown candidates.',

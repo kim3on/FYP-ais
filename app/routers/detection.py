@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from typing import Optional
 from datetime import datetime
 
-from app.core.pipeline import models_ready
+from app.core.pipeline import engine_ready
 from app.core.datasets import DATASET_CICIDS2017, normalize_dataset_type
 from app.state import _state, _build_engine
 from app.routers.auth import get_current_user
@@ -45,10 +45,10 @@ async def detect(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if not models_ready(_dataset_type):
+    if not engine_ready(_state["active_model"], _dataset_type):
         raise HTTPException(
             status_code=400,
-            detail=f"{_dataset_type} models not trained yet. Please upload a matching dataset and train first.",
+            detail=f"{_state['active_model']} is not ready for {_dataset_type}. Please train or select a matching model first.",
         )
     if _state["detect_status"] == "running":
         raise HTTPException(status_code=409, detail="Detection already in progress")
@@ -187,8 +187,8 @@ async def detect_sample(features: dict):
             detail="Live/sample detection is CICIDS2017-only. Train or select a CICIDS2017 model for live capture.",
         )
 
-    if not models_ready(DATASET_CICIDS2017):
-        raise HTTPException(status_code=400, detail="Models not trained")
+    if not engine_ready(_state["active_model"], DATASET_CICIDS2017):
+        raise HTTPException(status_code=400, detail=f"{_state['active_model']} model is not trained")
 
     engine = _build_engine(DATASET_CICIDS2017)
     result = engine.detect_sample(features)

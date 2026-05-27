@@ -15,6 +15,8 @@ export default function TrainingTab() {
     nDetectors, setND,
     benignRowLimit, setBenignRowLimit,
     trainTargetFpr, setTrainTargetFpr,
+    isoContamination, setIsoContamination,
+    isoEstimators, setIsoEstimators,
     trainLogs: logs, setTrainLogs: setLogs,
     setTrainResult: setResult,
     refreshStatus,
@@ -32,18 +34,20 @@ export default function TrainingTab() {
   async function handleTrain() {
     if (!file) { setError('Select a dataset file first.'); return; }
     const confirmed = window.confirm(
-      `Start training with "${file.name}"?\n\nTarget FPR: ${(trainTargetFpr * 100).toFixed(1)}%\nThis may take a while and will replace the current trained model for the selected dataset profile.`
+      `Start training with "${file.name}"?\n\nTarget FPR: ${(trainTargetFpr * 100).toFixed(1)}%\nNSA detectors: ${Number(nDetectors || 0).toLocaleString()}\nIsoFor trees: ${Number(isoEstimators || 0).toLocaleString()}\nThis may take a while and will replace the current trained models for the selected dataset profile.`
     );
     if (!confirmed) return;
     initializeNotificationSound();
     setError(''); setLoading(true); setResult(null);
-    setLogs(['[INFO] Starting NSA training pipeline…']);
+    setLogs(['[INFO] Starting unsupervised NSA + Isolation Forest training pipeline...']);
 
     try {
       // Start training (returns immediately — backend runs in background)
       const data = await startTraining(file, {
-        max_detectors: nDetectors,
+        max_detectors: nDetectors || 3000,
         target_fpr: trainTargetFpr,
+        contamination: isoContamination || 0.05,
+        iso_n_estimators: isoEstimators || 100,
         dataset_type: datasetType,
         ...(benignRowLimit ? { benign_row_limit: benignRowLimit } : {}),
       });
@@ -121,18 +125,8 @@ export default function TrainingTab() {
             />
           </div>
           <div className="card">
-            <div className="td-section-label">NSA Parameters</div>
+            <div className="td-section-label">Shared Calibration</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>Detectors —</span>
-                  <input type="number" value={nDetectors} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))} 
-                    style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
-                </label>
-                <input type="range" min="10" max="10000" step="10" value={nDetectors || 3000}
-                  onChange={e => setND(Number(e.target.value))}
-                  style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
-              </div>
               <div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>BENIGN Rows —</span>
@@ -170,7 +164,64 @@ export default function TrainingTab() {
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }}
                 />
                 <p className="td-detail-note" style={{ marginTop: '8px' }}>
-                  Calibrates the saved benign threshold during training. Batch and live detection use this after retraining.
+                  Shared BENIGN-only calibration for NSA and Isolation Forest. Batch and live detection use this after retraining.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="td-training-param-grid">
+            <div className="card">
+              <div className="td-section-label">NSA Parameters</div>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Detectors —</span>
+                  <input type="number" value={nDetectors} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))}
+                    style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
+                </label>
+                <input type="range" min="10" max="10000" step="10" value={nDetectors || 3000}
+                  onChange={e => setND(Number(e.target.value))}
+                  style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
+                <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                  Mature V-detectors for the AIS/NSA engine only.
+                </p>
+              </div>
+            </div>
+            <div className="card">
+              <div className="td-section-label">Isolation Forest Parameters</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <MetricLabel label="Contamination Prior" className="td-inline-label" />
+                    <input
+                      type="number"
+                      min="0.001"
+                      max="0.20"
+                      step="0.001"
+                      value={isoContamination}
+                      onChange={e => setIsoContamination(Math.min(0.20, Math.max(0.001, Number(e.target.value) || 0.05)))}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '84px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                    />
+                    <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                      {(isoContamination * 100).toFixed(1)}%
+                    </span>
+                  </label>
+                  <input type="range" min="0.001" max="0.20" step="0.001" value={isoContamination}
+                    onChange={e => setIsoContamination(Number(e.target.value))}
+                    style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>Trees / Estimators —</span>
+                    <input type="number" min="50" max="500" step="10" value={isoEstimators}
+                      onChange={e => setIsoEstimators(e.target.value === '' ? '' : Math.min(500, Math.max(50, Number(e.target.value) || 100)))}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
+                  </label>
+                  <input type="range" min="50" max="500" step="10" value={isoEstimators || 100}
+                    onChange={e => setIsoEstimators(Number(e.target.value))}
+                    style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
+                </div>
+                <p className="td-detail-note">
+                  IsoFor still uses BENIGN-calibrated thresholding; contamination is retained as the sklearn prior.
                 </p>
               </div>
             </div>

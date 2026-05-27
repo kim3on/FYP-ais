@@ -112,11 +112,15 @@ def _build_engine(dataset_type: str | None = None) -> DetectionEngine:
     """Build a DetectionEngine from the persisted artefacts."""
     selected_dataset = normalize_dataset_type(dataset_type or _state["active_dataset_type"])
     prep = load_preprocessor(selected_dataset)
+    if prep is None:
+        raise RuntimeError(f"No fitted preprocessor found for {selected_dataset}")
     model = (
         load_iso(selected_dataset)
         if _state["active_model"] == "isolation_forest"
         else load_nsa(selected_dataset)
     )
+    if model is None or not getattr(model, "is_fitted_", False):
+        raise RuntimeError(f"{_state['active_model']} model is not trained for {selected_dataset}")
     raw_sb = load_self_boundary(selected_dataset)
     pca_sb = load_pca_self_boundary(selected_dataset)
     return DetectionEngine(

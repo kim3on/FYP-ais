@@ -198,6 +198,12 @@
   padding-top: 12px;
 }
 
+.td-training-param-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .td-detail-value {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -405,4 +411,56 @@
   font-size: 11px;
   padding: 22px;
   text-align: center;
+}
+
+.td-comparison-panel {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.td-comparison-meta {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.td-comparison-table-wrap {
+  overflow-x: auto;
+}
+
+.td-comparison-table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  min-width: 420px;
+  width: 100%;
+}
+
+.td-comparison-table th,
+.td-comparison-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.td-comparison-table th {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.td-comparison-table td {
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .td-dataset-selector,
+  .td-training-param-grid,
+  .td-metric-grid {
+    grid-template-columns: 1fr;
+  }
 }

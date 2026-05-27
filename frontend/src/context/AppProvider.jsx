@@ -42,6 +42,8 @@ export function AppProvider({ children }) {
   const [nDetectors, setND]             = useState(3000);
   const [benignRowLimit, setBenignRowLimit] = useState(20000);
   const [trainTargetFpr, setTrainTargetFpr] = useState(() => loadStoredJson('ais_train_target_fpr', 0.10));
+  const [isoContamination, setIsoContamination] = useState(() => loadStoredJson('ais_iso_contamination', 0.05));
+  const [isoEstimators, setIsoEstimators] = useState(() => loadStoredJson('ais_iso_estimators', 100));
   const [trainLogs, setTrainLogs]       = useState([]);
   const [trainResult, setTrainResult]   = useState(null);
 
@@ -54,6 +56,14 @@ export function AppProvider({ children }) {
   useEffect(() => {
     storeJson('ais_train_target_fpr', trainTargetFpr);
   }, [trainTargetFpr]);
+
+  useEffect(() => {
+    storeJson('ais_iso_contamination', isoContamination);
+  }, [isoContamination]);
+
+  useEffect(() => {
+    storeJson('ais_iso_estimators', isoEstimators);
+  }, [isoEstimators]);
 
   useEffect(() => {
     storeJson('ais_detect_limit', detectLimit);
@@ -103,7 +113,9 @@ export function AppProvider({ children }) {
     try {
       const status = await getSystemStatus();
       setSystemStatus(status);
-      if (status.active_model) setActiveModel(status.active_model);
+      if (status.active_detection_engine || status.active_model) {
+        setActiveModel(status.active_detection_engine || status.active_model);
+      }
       if (status.active_dataset_type) setDatasetType(status.active_dataset_type);
     } catch (err) {
       console.error("Failed to refresh status:", err);
@@ -151,6 +163,7 @@ export function AppProvider({ children }) {
       theme, setTheme,
       trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit,
       trainTargetFpr, setTrainTargetFpr,
+      isoContamination, setIsoContamination, isoEstimators, setIsoEstimators,
       trainLogs, setTrainLogs, trainResult, setTrainResult,
       detectFile, setDetectFile, detectLimit, setDetectLimit, detectOffset, setDetectOffset,
       detectLogs, setDetectLogs, detectResult, setDetectResult,

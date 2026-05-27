@@ -95,11 +95,12 @@ export default function Settings() {
   const [saved, setSaved]           = useState(false);
   const [error, setError]           = useState('');
   const [clearingDB, setClearingDB] = useState(false);
+  const activeReady = systemStatus?.active_engine_ready ?? systemStatus?.models_ready;
 
   useEffect(() => {
     getSystemStatus().then(s => {
       setSystemStatus(s);
-      if (s.active_model) setActiveModel(s.active_model);
+      if (s.active_detection_engine || s.active_model) setActiveModel(s.active_detection_engine || s.active_model);
       if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
     }).catch(err => {
       console.error("Failed to fetch system status:", err);
@@ -128,6 +129,7 @@ export default function Settings() {
       await refreshStatus();
       getSystemStatus().then(s => {
         setSystemStatus(s);
+        if (s.active_detection_engine || s.active_model) setActiveModel(s.active_detection_engine || s.active_model);
         if (s.zero_day_threshold != null) setZdThreshold(Number(s.zero_day_threshold));
       }).catch(err => {
         console.error("Failed to refresh system status:", err);
@@ -200,8 +202,8 @@ export default function Settings() {
               <div className="settings-status-grid">
                 <div>
                   <span>Model Status</span>
-                  <strong className={systemStatus?.models_ready ? 't-success' : 't-warning'}>
-                    {systemStatus?.models_ready ? 'Ready' : 'Not Ready'}
+                  <strong className={activeReady ? 't-success' : 't-warning'}>
+                    {activeReady ? 'Ready' : 'Not Ready'}
                   </strong>
                 </div>
                 <div>
@@ -278,7 +280,10 @@ export default function Settings() {
             <div className="settings-info-list">
               <div><span>Database Status</span><strong className="t-success">Connected</strong></div>
               <div><span>API Status</span><strong className={systemStatus ? 't-success' : 't-warning'}>{systemStatus ? 'Connected' : 'Unknown'}</strong></div>
-              <div><span>Antibody Count</span><strong>{(systemStatus?.antibody_count ?? 0).toLocaleString()}</strong></div>
+              <div>
+                <span>{systemStatus?.active_model_stat_label || 'Active Model Count'}</span>
+                <strong>{(systemStatus?.active_model_stat_value ?? 0).toLocaleString()}</strong>
+              </div>
             </div>
 
             {modelInfo && modelInfo[activeModel] && (

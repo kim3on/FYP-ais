@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 
 from app.core.pipeline import (
+    engine_ready,
     load_nsa,
     load_iso,
     load_self_boundary,
@@ -43,12 +44,17 @@ router = APIRouter(tags=["dashboard"])
 async def system_status(user=Depends(get_current_user)):
     """System health and model readiness."""
     dataset_type = _state.get("active_dataset_type", DATASET_CICIDS2017)
-    ready = models_ready(dataset_type)
+    full_ready = models_ready(dataset_type)
+    active_ready = engine_ready(_state["active_model"], dataset_type)
     nsa   = load_nsa(dataset_type)
+    iso   = load_iso(dataset_type)
+    active_stat = _active_engine_stat(_state["active_model"], nsa, iso)
     return {
-        "status":         _state["status"] if ready else "idle",
-        "models_ready":   ready,
+        "status":         _state["status"] if active_ready else "idle",
+        "models_ready":   full_ready,
+        "active_engine_ready": active_ready,
         "active_model":   _state["active_model"],
+        "active_detection_engine": _state["active_model"],
         "active_dataset_type": dataset_type,
         "dataset_display": dataset_display_name(dataset_type),
         "packet_count":   _state["packet_count"],
@@ -61,6 +67,10 @@ async def system_status(user=Depends(get_current_user)):
         "runtime_alert_threshold_enabled": RUNTIME_ALERT_THRESHOLD_ENABLED,
         "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
         "antibody_count": nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0,
+        "isolation_tree_count": iso.n_estimators if (iso and iso.is_fitted_) else 0,
+        "active_model_stat_label": active_stat["label"],
+        "active_model_stat_value": active_stat["value"],
+        "active_model_stat_subtitle": active_stat["subtitle"],
         "server_time":    datetime.utcnow().isoformat(),
     }
 
@@ -87,14 +97,25 @@ async def dashboard_stats(user=Depends(get_current_user)):
     finally:
         db.close()
 
-    nsa        = load_nsa(DATASET_CICIDS2017)
+    dataset_type = _state.get("active_dataset_type", DATASET_CICIDS2017)
+    nsa        = load_nsa(dataset_type)
+    iso        = load_iso(dataset_type)
     antibodies = nsa.meta_.get("mature_detectors", 0) if (nsa and nsa.is_fitted_) else 0
+    iso_trees = iso.n_estimators if (iso and iso.is_fitted_) else 0
+    active_stat = _active_engine_stat(_state["active_model"], nsa, iso)
 
     return {
         "total_packets":     _state["packet_count"],
         "anomalies_total":   total_anomalies,
         "critical_alerts":   severity_counts["critical"],
         "active_antibodies": antibodies,
+        "isolation_trees":   iso_trees,
+        "active_engine":     _state["active_model"],
+        "active_detection_engine": _state["active_model"],
+        "active_engine_ready": engine_ready(_state["active_model"], dataset_type),
+        "active_model_stat_label": active_stat["label"],
+        "active_model_stat_value": active_stat["value"],
+        "active_model_stat_subtitle": active_stat["subtitle"],
         "severity_counts":   severity_counts,
         "system_status":     _state["status"],
     }
@@ -113,13 +134,16 @@ async def model_summary(user=Depends(get_current_user)):
     raw_sb = load_self_boundary(dataset_type)
     pca_sb = load_pca_self_boundary(dataset_type)
     nsa_summary = nsa.summary() if nsa else {"status": "not_trained"}
+    iso_summary = iso.summary() if iso else {"status": "not_trained"}
     return {
         "nsa":              nsa_summary,
-        "isolation_forest": iso.summary()  if iso  else {"status": "not_trained"},
+        "isolation_forest": iso_summary,
         "raw_self_boundary_evidence": raw_sb.summary() if raw_sb else {"status": "not_trained"},
         "pca_self_boundary": pca_sb.summary() if pca_sb else {"status": "not_trained"},
         "dataset_type": dataset_type,
         "dataset_display": dataset_display_name(dataset_type),
+        "models_ready": models_ready(dataset_type),
+        "active_engine_ready": engine_ready(_state["active_model"], dataset_type),
         "ais_detection": {
             "detector_count": nsa_summary.get("mature_detectors", 0),
             "fusion_mode": "NSA + PCA-space Self-Boundary + benign-calibrated fusion threshold",
@@ -127,6 +151,7 @@ async def model_summary(user=Depends(get_current_user)):
             "raw_self_boundary_evidence_status": "active" if raw_sb else "missing",
         },
         "active":           _state["active_model"],
+        "active_detection_engine": _state["active_model"],
     }
 
 
@@ -170,6 +195,8 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
     return {
         "success": True,
         "active_model": _state["active_model"],
+        "active_detection_engine": _state["active_model"],
+        "active_engine_ready": engine_ready(_state["active_model"], _state.get("active_dataset_type", DATASET_CICIDS2017)),
         "active_dataset_type": _state.get("active_dataset_type", DATASET_CICIDS2017),
         "threshold": float(
             _state.get("threshold", DEFAULT_ALERT_THRESHOLD)
@@ -178,6 +205,20 @@ async def update_settings(settings: SettingsUpdate, user=Depends(get_current_use
         ),
         "runtime_alert_threshold_enabled": RUNTIME_ALERT_THRESHOLD_ENABLED,
         "zero_day_threshold": float(_state.get("zero_day_threshold", DEFAULT_ZERO_DAY_THRESHOLD)),
+    }
+
+
+def _active_engine_stat(active_model: str, nsa, iso) -> dict:
+    if active_model == "isolation_forest":
+        return {
+            "label": "Isolation Trees",
+            "value": int(getattr(iso, "n_estimators", 0) or 0) if (iso and getattr(iso, "is_fitted_", False)) else 0,
+            "subtitle": "Isolation Forest baseline",
+        }
+    return {
+        "label": "Active Antibodies",
+        "value": int(nsa.meta_.get("mature_detectors", 0)) if (nsa and getattr(nsa, "is_fitted_", False)) else 0,
+        "subtitle": "Generated via Negative Selection",
     }
 
 

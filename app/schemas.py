@@ -38,6 +38,7 @@ class TrainConfig(BaseModel):
     max_detectors: int = 3000
     max_attempts: int = 100_000
     contamination: float = 0.05
+    iso_n_estimators: int = 100
     test_size: float = 0.2
     n_pca_components: Optional[int] = 25
     benign_row_limit: Optional[int] = 20_000

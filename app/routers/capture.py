@@ -20,7 +20,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
 
-from app.core.pipeline import models_ready
+from app.core.pipeline import engine_ready
 from app.core.datasets import DATASET_CICIDS2017
 from app.core.capture_factory import get_packet_sniffer_class
 from app.core.cicflow_bridge import CICFlowMeterAdapter
@@ -52,10 +52,10 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
             detail="Live capture is CICIDS2017-only. NSL-KDD models are batch benchmark models and cannot score live CICFlowMeter features.",
         )
 
-    if not models_ready(DATASET_CICIDS2017):
+    if not engine_ready(_state["active_model"], DATASET_CICIDS2017):
         raise HTTPException(
             status_code=400,
-            detail="Models not trained yet. Train first, then start capture.",
+            detail=f"{_state['active_model']} is not ready. Train first, then start capture.",
         )
 
     try:
@@ -290,8 +290,8 @@ async def submit_flow_file(
             status_code=400,
             detail="Manual flow submission is CICIDS2017-only. Select or train a CICIDS2017 model first.",
         )
-    if not models_ready(DATASET_CICIDS2017):
-        raise HTTPException(status_code=400, detail="Models not trained yet. Train first, then submit a flow file.")
+    if not engine_ready(_state["active_model"], DATASET_CICIDS2017):
+        raise HTTPException(status_code=400, detail=f"{_state['active_model']} is not ready. Train first, then submit a flow file.")
 
     filename = file.filename or "submitted-flow"
     suffix = Path(filename).suffix.lower()

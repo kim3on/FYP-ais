@@ -19,7 +19,8 @@ export default function Layout() {
 
   if (!isAuthenticated) return null;
 
-  const isReady = systemStatus?.models_ready;
+  const isReady = systemStatus?.active_engine_ready ?? systemStatus?.models_ready;
+  const activeEngine = systemStatus?.active_detection_engine || systemStatus?.active_model || 'NSA';
 
   return (
     <div className={`app-layout ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
@@ -35,7 +36,7 @@ export default function Layout() {
           <div className="status-item">
             <span className={`status-dot ${isReady ? 'online' : 'warning'}`} />
             <span className={`status-text ${isReady ? 't-success' : 't-warning'}`}>
-              {isReady ? (systemStatus.active_model || 'NSA').toUpperCase() : 'NO MODEL'}
+              {isReady ? activeEngine.toUpperCase() : 'NO MODEL'}
             </span>
           </div>
         </div>

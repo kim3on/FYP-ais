@@ -160,6 +160,7 @@ function StatCard({ icon, iconColor, topRight, label, value, sub, subColor }) {
 export default function Dashboard() {
   const {
     alerts, setAlerts,
+    systemStatus,
     dashStats,
     refreshStatus, refreshDashStats,
     captureRunning, setCaptureRunning,
@@ -451,6 +452,9 @@ export default function Dashboard() {
 
   const sevLevel = getSeverityLevel(alerts);
   const badge = SEVERITY_BADGE[sevLevel];
+  const activeModelStatLabel = dashStats?.active_model_stat_label || systemStatus?.active_model_stat_label || 'Active Antibodies';
+  const activeModelStatValue = dashStats?.active_model_stat_value ?? systemStatus?.active_model_stat_value ?? dashStats?.active_antibodies ?? 0;
+  const activeModelStatSubtitle = dashStats?.active_model_stat_subtitle || systemStatus?.active_model_stat_subtitle || 'Generated via Negative Selection';
 
   return (
     <div className="page">
@@ -487,9 +491,9 @@ export default function Dashboard() {
         <StatCard
           icon={<IcoShield />} iconColor="#3b82f6"
           topRight={<span style={{ color: 'var(--success)' }}><IcoCheck /></span>}
-          label="Active Antibodies"
-          value={(dashStats?.active_antibodies ?? 0).toLocaleString()}
-          sub="Generated via Negative Selection"
+          label={activeModelStatLabel}
+          value={Number(activeModelStatValue || 0).toLocaleString()}
+          sub={activeModelStatSubtitle}
           subColor="var(--accent)"
         />
         <StatCard 

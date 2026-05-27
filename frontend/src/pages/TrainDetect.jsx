@@ -15,7 +15,7 @@ export default function TrainDetect() {
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">Train & Detect</h1>
-        <p className="page-subtitle">Train an unsupervised NSA self profile · Run batch anomaly detection</p>
+        <p className="page-subtitle">Train unsupervised NSA and Isolation Forest profiles · Run batch anomaly detection</p>
       </div>
 
       <GlobalTrainingResult />
