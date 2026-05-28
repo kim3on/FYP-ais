@@ -111,7 +111,6 @@ export function MetricsGrid({ result }) {
     ['Anomaly Rate', result.detection_rate_pct != null ? result.detection_rate_pct / 100 : null],
     ['Normal Flows', result.normal_count, 'count'],
     ['Anomalies', result.anomalies_found, 'count'],
-    ['Zero-Day Candidates', result.zero_day_candidates, 'count'],
   ].filter(([, v]) => v != null);
   const displayRows = rows.length ? rows : unsupervisedRows;
   const counts = [

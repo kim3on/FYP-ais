@@ -1,0 +1,981 @@
+{
+  "config": {
+    "dataset": "datasets\\cicids2017\\DoS-Wednesday-no-metadata.parquet",
+    "benign_limit": 60000,
+    "attack_limit": 5000,
+    "target_fpr": 0.1,
+    "max_detectors": 1000,
+    "max_attempts": 40000,
+    "latent_dim": "16",
+    "dae_noise_std": 0.05,
+    "dae_hidden_width": 64,
+    "dae_max_iter": 60,
+    "random_state": 42
+  },
+  "data_counts": {
+    "total_rows": 584991,
+    "benign_rows_available": 391235,
+    "attack_rows_available": 193756,
+    "benign_rows_used": 60000,
+    "attack_rows_used": 5000,
+    "benign_train": 36000,
+    "benign_calibration": 12000,
+    "benign_test": 12000,
+    "eval_rows": 17000
+  },
+  "runs": [
+    {
+      "name": "PCA + NSA",
+      "latent_dim": 1,
+      "training_seconds": 2.376,
+      "nsa_summary": {
+        "status": "fitted",
+        "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
+        "r": 0.05,
+        "r_s": 0.01,
+        "max_detectors": 1000,
+        "n_self_samples": 36000,
+        "self_match_cap": 3000,
+        "n_features": 1,
+        "attempts": 40000,
+        "candidates_rejected": 13628,
+        "candidates_rejected_overlap": 25899,
+        "candidate_strategy": "expanded_pca_tail_envelope_plus_centroid_and_boundary_mutation",
+        "mature_detectors": 473,
+        "det_radius_min": 6.617584379311689e-05,
+        "det_radius_max": 2.0129018986402225,
+        "det_radius_mean": 0.23896984861457218,
+        "performance_profile": "laptop",
+        "self_ref_cap": 3000,
+        "distance_matrix_entry_budget": 4000000,
+        "auto_threshold": true,
+        "r_fitted": 0.05,
+        "r_s_fitted": 0.01,
+        "score_threshold": 0.0,
+        "fusion_threshold": null,
+        "target_fpr": 0.1,
+        "calibration": {
+          "mode": "unsupervised_benign_pure_nsa",
+          "score_mode": "self_gap_distance",
+          "target_fpr": 0.1,
+          "self_gap_target_fpr": 0.07975,
+          "observed_fpr": 0.093167,
+          "normal_pass_rate": 0.906833,
+          "threshold": 0.0,
+          "score_scale": 0.145308,
+          "n_calibration_samples": 12000,
+          "self_gap_calibration_samples": 11757,
+          "rank_index": 10821,
+          "rank_index_zero_based": 10820,
+          "calibration_reliability": "stable",
+          "decision_rule": "v_detector_match OR self_distance > threshold",
+          "target_achieved": true,
+          "target_achievement_reason": "Selected a benign-only conformal self-gap threshold whose full pure-NSA benign FPR stays within target.",
+          "detector_match_fpr": 0.02025,
+          "self_gap_only_fpr": 0.072917,
+          "detector_match_count": 243,
+          "score_min": 0.0,
+          "score_median": 0.0,
+          "score_p95": 0.000559,
+          "score_p99": 0.032485,
+          "score_max": 0.379801
+        },
+        "fusion_calibration": {
+          "mode": "disabled_legacy",
+          "score_mode": "disabled",
+          "active": false,
+          "reason": "Weighted fusion is disabled; active NSA decision uses v_detector_match OR self_distance > threshold."
+        },
+        "trained_at": "2026-05-28T14:44:14.940367+00:00",
+        "fusion_weights": {},
+        "fusion_component_scales": {},
+        "active_antibodies": 473
+      },
+      "nsa_calibration": {
+        "mode": "unsupervised_benign_pure_nsa",
+        "score_mode": "self_gap_distance",
+        "target_fpr": 0.1,
+        "self_gap_target_fpr": 0.07975,
+        "observed_fpr": 0.093167,
+        "normal_pass_rate": 0.906833,
+        "threshold": 0.0,
+        "score_scale": 0.145308,
+        "n_calibration_samples": 12000,
+        "self_gap_calibration_samples": 11757,
+        "rank_index": 10821,
+        "rank_index_zero_based": 10820,
+        "calibration_reliability": "stable",
+        "decision_rule": "v_detector_match OR self_distance > threshold",
+        "target_achieved": true,
+        "target_achievement_reason": "Selected a benign-only conformal self-gap threshold whose full pure-NSA benign FPR stays within target.",
+        "detector_match_fpr": 0.02025,
+        "self_gap_only_fpr": 0.072917,
+        "detector_match_count": 243,
+        "score_min": 0.0,
+        "score_median": 0.0,
+        "score_p95": 0.000559,
+        "score_p99": 0.032485,
+        "score_max": 0.379801
+      },
+      "representation": {
+        "explained_variance_ratio_sum": 0.9845088124275208
+      },
+      "metrics": {
+        "model_name": "PCA + NSA",
+        "accuracy": 0.7638,
+        "precision": 0.6584,
+        "recall": 0.409,
+        "f1": 0.5046,
+        "tp": 2045,
+        "tn": 10939,
+        "fp": 1061,
+        "fn": 2955,
+        "false_positive_rate": 0.0884,
+        "false_negative_rate": 0.591,
+        "detection_rate": 0.409,
+        "true_positive_rate": 0.409,
+        "per_category": {
+          "normal": {
+            "correct": 10939,
+            "total": 12000,
+            "rate": 0.9116
+          },
+          "DoS": {
+            "correct": 2045,
+            "total": 5000,
+            "rate": 0.409
+          }
+        },
+        "n_samples": 17000,
+        "n_attacks": 5000,
+        "n_normal": 12000,
+        "evaluated_at": "2026-05-28T14:44:16.204191",
+        "metric_assessment": {
+          "recall": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.92,
+              0.97
+            ],
+            "acceptable_range": [
+              0.85,
+              0.92
+            ],
+            "value": 0.409
+          },
+          "false_negative_rate": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.03,
+              0.08
+            ],
+            "acceptable_range": [
+              0.08,
+              0.15
+            ],
+            "value": 0.591
+          },
+          "false_positive_rate": {
+            "grade": "prototype_acceptable",
+            "desired_range": [
+              0.03,
+              0.06
+            ],
+            "acceptable_range": [
+              0.06,
+              0.1
+            ],
+            "value": 0.0884
+          },
+          "precision": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.8,
+              0.92
+            ],
+            "acceptable_range": [
+              0.7,
+              0.8
+            ],
+            "value": 0.6584
+          },
+          "f1": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.85,
+              0.94
+            ],
+            "acceptable_range": [
+              0.75,
+              0.85
+            ],
+            "value": 0.5046
+          }
+        },
+        "metric_explanations": {
+          "tp": "True Positives: attack flows correctly flagged as anomalies.",
+          "tn": "True Negatives: benign flows correctly passed as normal.",
+          "fp": "False Positives: benign flows incorrectly flagged as anomalies.",
+          "fn": "False Negatives: attack flows missed as normal.",
+          "recall": "Recall / Detection Rate / TPR: percentage of real attacks caught. Main IDS metric.",
+          "false_negative_rate": "FNR: percentage of real attacks missed. Lower is better.",
+          "false_positive_rate": "FPR: percentage of benign flows incorrectly alerted. Lower is better.",
+          "precision": "Precision: percentage of alerts that are true attacks.",
+          "f1": "F1-score: harmonic mean of precision and recall.",
+          "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
+          "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+          "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
+        },
+        "threshold_analysis": {
+          "available": true,
+          "verification_only": true,
+          "score_space": "raw_anomaly_score",
+          "target_recall_range": [
+            0.92,
+            0.97
+          ],
+          "target_fpr_range": [
+            0.0,
+            0.1
+          ],
+          "target_achieved": false,
+          "recommendation_reason": "Selected highest Recall with FPR <= 10%.",
+          "recommended": {
+            "threshold": 0.0,
+            "tp": 2045,
+            "tn": 10939,
+            "fp": 1061,
+            "fn": 2955,
+            "recall": 0.409,
+            "true_positive_rate": 0.409,
+            "false_negative_rate": 0.591,
+            "false_positive_rate": 0.0884,
+            "precision": 0.6584,
+            "f1": 0.5046,
+            "accuracy": 0.7638
+          },
+          "table": [
+            {
+              "threshold": 0.0,
+              "tp": 2045,
+              "tn": 10939,
+              "fp": 1061,
+              "fn": 2955,
+              "recall": 0.409,
+              "true_positive_rate": 0.409,
+              "false_negative_rate": 0.591,
+              "false_positive_rate": 0.0884,
+              "precision": 0.6584,
+              "f1": 0.5046,
+              "accuracy": 0.7638
+            },
+            {
+              "threshold": 0.000122,
+              "tp": 2034,
+              "tn": 11109,
+              "fp": 891,
+              "fn": 2966,
+              "recall": 0.4068,
+              "true_positive_rate": 0.4068,
+              "false_negative_rate": 0.5932,
+              "false_positive_rate": 0.0742,
+              "precision": 0.6954,
+              "f1": 0.5133,
+              "accuracy": 0.7731
+            },
+            {
+              "threshold": 0.000691,
+              "tp": 2003,
+              "tn": 11455,
+              "fp": 545,
+              "fn": 2997,
+              "recall": 0.4006,
+              "true_positive_rate": 0.4006,
+              "false_negative_rate": 0.5994,
+              "false_positive_rate": 0.0454,
+              "precision": 0.7861,
+              "f1": 0.5307,
+              "accuracy": 0.7916
+            },
+            {
+              "threshold": 0.006099,
+              "tp": 1805,
+              "tn": 11681,
+              "fp": 319,
+              "fn": 3195,
+              "recall": 0.361,
+              "true_positive_rate": 0.361,
+              "false_negative_rate": 0.639,
+              "false_positive_rate": 0.0266,
+              "precision": 0.8498,
+              "f1": 0.5067,
+              "accuracy": 0.7933
+            },
+            {
+              "threshold": 0.006176,
+              "tp": 1277,
+              "tn": 11702,
+              "fp": 298,
+              "fn": 3723,
+              "recall": 0.2554,
+              "true_positive_rate": 0.2554,
+              "false_negative_rate": 0.7446,
+              "false_positive_rate": 0.0248,
+              "precision": 0.8108,
+              "f1": 0.3884,
+              "accuracy": 0.7635
+            },
+            {
+              "threshold": 0.007257,
+              "tp": 1024,
+              "tn": 11749,
+              "fp": 251,
+              "fn": 3976,
+              "recall": 0.2048,
+              "true_positive_rate": 0.2048,
+              "false_negative_rate": 0.7952,
+              "false_positive_rate": 0.0209,
+              "precision": 0.8031,
+              "f1": 0.3264,
+              "accuracy": 0.7514
+            },
+            {
+              "threshold": 0.01325,
+              "tp": 917,
+              "tn": 11766,
+              "fp": 234,
+              "fn": 4083,
+              "recall": 0.1834,
+              "true_positive_rate": 0.1834,
+              "false_negative_rate": 0.8166,
+              "false_positive_rate": 0.0195,
+              "precision": 0.7967,
+              "f1": 0.2982,
+              "accuracy": 0.7461
+            },
+            {
+              "threshold": 0.025653,
+              "tp": 812,
+              "tn": 11772,
+              "fp": 228,
+              "fn": 4188,
+              "recall": 0.1624,
+              "true_positive_rate": 0.1624,
+              "false_negative_rate": 0.8376,
+              "false_positive_rate": 0.019,
+              "precision": 0.7808,
+              "f1": 0.2689,
+              "accuracy": 0.7402
+            },
+            {
+              "threshold": 0.443105,
+              "tp": 812,
+              "tn": 11772,
+              "fp": 228,
+              "fn": 4188,
+              "recall": 0.1624,
+              "true_positive_rate": 0.1624,
+              "false_negative_rate": 0.8376,
+              "false_positive_rate": 0.019,
+              "precision": 0.7808,
+              "f1": 0.2689,
+              "accuracy": 0.7402
+            }
+          ],
+          "forced_positive_count": 1040,
+          "note": "Report-only threshold analysis. Labels are used after detection to evaluate tradeoffs; the trained unsupervised model threshold is not changed."
+        },
+        "confidence_mean_anomaly": 0.292447198969736
+      }
+    },
+    {
+      "name": "Denoising AE latent + NSA",
+      "latent_dim": 16,
+      "training_seconds": 1.803,
+      "nsa_summary": {
+        "status": "fitted",
+        "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
+        "r": 0.19177846610546112,
+        "r_s": 0.01,
+        "max_detectors": 1000,
+        "n_self_samples": 36000,
+        "self_match_cap": 3000,
+        "n_features": 16,
+        "attempts": 1000,
+        "candidates_rejected": 0,
+        "candidates_rejected_overlap": 0,
+        "candidate_strategy": "expanded_pca_tail_envelope_plus_centroid_and_boundary_mutation",
+        "mature_detectors": 1000,
+        "det_radius_min": 0.14028952631189964,
+        "det_radius_max": 1.2356068086037482,
+        "det_radius_mean": 0.5375483368806444,
+        "performance_profile": "laptop",
+        "self_ref_cap": 3000,
+        "distance_matrix_entry_budget": 4000000,
+        "auto_threshold": true,
+        "r_fitted": 0.191778,
+        "r_s_fitted": 0.01,
+        "score_threshold": 0.04078829288482666,
+        "fusion_threshold": null,
+        "target_fpr": 0.1,
+        "calibration": {
+          "mode": "unsupervised_benign_pure_nsa",
+          "score_mode": "self_gap_distance",
+          "target_fpr": 0.1,
+          "self_gap_target_fpr": 0.063,
+          "observed_fpr": 0.097583,
+          "normal_pass_rate": 0.902417,
+          "threshold": 0.040788,
+          "score_scale": 0.449029,
+          "n_calibration_samples": 12000,
+          "self_gap_calibration_samples": 11556,
+          "rank_index": 10829,
+          "rank_index_zero_based": 10828,
+          "calibration_reliability": "stable",
+          "decision_rule": "v_detector_match OR self_distance > threshold",
+          "target_achieved": true,
+          "target_achievement_reason": "Selected a benign-only conformal self-gap threshold whose full pure-NSA benign FPR stays within target.",
+          "detector_match_fpr": 0.037,
+          "self_gap_only_fpr": 0.060583,
+          "detector_match_count": 444,
+          "score_min": 0.0,
+          "score_median": 0.005642,
+          "score_p95": 0.077608,
+          "score_p99": 0.19819,
+          "score_max": 0.767938
+        },
+        "fusion_calibration": {
+          "mode": "disabled_legacy",
+          "score_mode": "disabled",
+          "active": false,
+          "reason": "Weighted fusion is disabled; active NSA decision uses v_detector_match OR self_distance > threshold."
+        },
+        "trained_at": "2026-05-28T14:44:16.446549+00:00",
+        "fusion_weights": {},
+        "fusion_component_scales": {},
+        "active_antibodies": 1000
+      },
+      "nsa_calibration": {
+        "mode": "unsupervised_benign_pure_nsa",
+        "score_mode": "self_gap_distance",
+        "target_fpr": 0.1,
+        "self_gap_target_fpr": 0.063,
+        "observed_fpr": 0.097583,
+        "normal_pass_rate": 0.902417,
+        "threshold": 0.040788,
+        "score_scale": 0.449029,
+        "n_calibration_samples": 12000,
+        "self_gap_calibration_samples": 11556,
+        "rank_index": 10829,
+        "rank_index_zero_based": 10828,
+        "calibration_reliability": "stable",
+        "decision_rule": "v_detector_match OR self_distance > threshold",
+        "target_achieved": true,
+        "target_achievement_reason": "Selected a benign-only conformal self-gap threshold whose full pure-NSA benign FPR stays within target.",
+        "detector_match_fpr": 0.037,
+        "self_gap_only_fpr": 0.060583,
+        "detector_match_count": 444,
+        "score_min": 0.0,
+        "score_median": 0.005642,
+        "score_p95": 0.077608,
+        "score_p99": 0.19819,
+        "score_max": 0.767938
+      },
+      "representation": {
+        "hidden_layers": [
+          64,
+          16,
+          64
+        ],
+        "activation": "tanh",
+        "noise_std": 0.05,
+        "n_iter": 45,
+        "final_loss": 5444245129368.715,
+        "train_reconstruction_mse": 10742576185344.0,
+        "cal_reconstruction_mse": 10585237356544.0
+      },
+      "metrics": {
+        "model_name": "Denoising AE latent + NSA",
+        "accuracy": 0.6666,
+        "precision": 0.2951,
+        "recall": 0.0962,
+        "f1": 0.1451,
+        "tp": 481,
+        "tn": 10851,
+        "fp": 1149,
+        "fn": 4519,
+        "false_positive_rate": 0.0958,
+        "false_negative_rate": 0.9038,
+        "detection_rate": 0.0962,
+        "true_positive_rate": 0.0962,
+        "per_category": {
+          "normal": {
+            "correct": 10851,
+            "total": 12000,
+            "rate": 0.9042
+          },
+          "DoS": {
+            "correct": 481,
+            "total": 5000,
+            "rate": 0.0962
+          }
+        },
+        "n_samples": 17000,
+        "n_attacks": 5000,
+        "n_normal": 12000,
+        "evaluated_at": "2026-05-28T14:44:17.899242",
+        "metric_assessment": {
+          "recall": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.92,
+              0.97
+            ],
+            "acceptable_range": [
+              0.85,
+              0.92
+            ],
+            "value": 0.0962
+          },
+          "false_negative_rate": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.03,
+              0.08
+            ],
+            "acceptable_range": [
+              0.08,
+              0.15
+            ],
+            "value": 0.9038
+          },
+          "false_positive_rate": {
+            "grade": "prototype_acceptable",
+            "desired_range": [
+              0.03,
+              0.06
+            ],
+            "acceptable_range": [
+              0.06,
+              0.1
+            ],
+            "value": 0.0958
+          },
+          "precision": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.8,
+              0.92
+            ],
+            "acceptable_range": [
+              0.7,
+              0.8
+            ],
+            "value": 0.2951
+          },
+          "f1": {
+            "grade": "needs_improvement",
+            "desired_range": [
+              0.85,
+              0.94
+            ],
+            "acceptable_range": [
+              0.75,
+              0.85
+            ],
+            "value": 0.1451
+          }
+        },
+        "metric_explanations": {
+          "tp": "True Positives: attack flows correctly flagged as anomalies.",
+          "tn": "True Negatives: benign flows correctly passed as normal.",
+          "fp": "False Positives: benign flows incorrectly flagged as anomalies.",
+          "fn": "False Negatives: attack flows missed as normal.",
+          "recall": "Recall / Detection Rate / TPR: percentage of real attacks caught. Main IDS metric.",
+          "false_negative_rate": "FNR: percentage of real attacks missed. Lower is better.",
+          "false_positive_rate": "FPR: percentage of benign flows incorrectly alerted. Lower is better.",
+          "precision": "Precision: percentage of alerts that are true attacks.",
+          "f1": "F1-score: harmonic mean of precision and recall.",
+          "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
+          "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+          "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
+        },
+        "threshold_analysis": {
+          "available": true,
+          "verification_only": true,
+          "score_space": "raw_anomaly_score",
+          "target_recall_range": [
+            0.92,
+            0.97
+          ],
+          "target_fpr_range": [
+            0.0,
+            0.1
+          ],
+          "target_achieved": false,
+          "recommendation_reason": "Selected highest Recall with FPR <= 10%.",
+          "recommended": {
+            "threshold": 0.052386,
+            "tp": 413,
+            "tn": 11096,
+            "fp": 904,
+            "fn": 4587,
+            "recall": 0.0826,
+            "true_positive_rate": 0.0826,
+            "false_negative_rate": 0.9174,
+            "false_positive_rate": 0.0753,
+            "precision": 0.3136,
+            "f1": 0.1308,
+            "accuracy": 0.677
+          },
+          "table": [
+            {
+              "threshold": 0.0,
+              "tp": 1011,
+              "tn": 3533,
+              "fp": 8467,
+              "fn": 3989,
+              "recall": 0.2022,
+              "true_positive_rate": 0.2022,
+              "false_negative_rate": 0.7978,
+              "false_positive_rate": 0.7056,
+              "precision": 0.1067,
+              "f1": 0.1397,
+              "accuracy": 0.2673
+            },
+            {
+              "threshold": 0.000345,
+              "tp": 969,
+              "tn": 3973,
+              "fp": 8027,
+              "fn": 4031,
+              "recall": 0.1938,
+              "true_positive_rate": 0.1938,
+              "false_negative_rate": 0.8062,
+              "false_positive_rate": 0.6689,
+              "precision": 0.1077,
+              "f1": 0.1385,
+              "accuracy": 0.2907
+            },
+            {
+              "threshold": 0.000488,
+              "tp": 934,
+              "tn": 4132,
+              "fp": 7868,
+              "fn": 4066,
+              "recall": 0.1868,
+              "true_positive_rate": 0.1868,
+              "false_negative_rate": 0.8132,
+              "false_positive_rate": 0.6557,
+              "precision": 0.1061,
+              "f1": 0.1353,
+              "accuracy": 0.298
+            },
+            {
+              "threshold": 0.000913,
+              "tp": 924,
+              "tn": 4466,
+              "fp": 7534,
+              "fn": 4076,
+              "recall": 0.1848,
+              "true_positive_rate": 0.1848,
+              "false_negative_rate": 0.8152,
+              "false_positive_rate": 0.6278,
+              "precision": 0.1092,
+              "f1": 0.1373,
+              "accuracy": 0.3171
+            },
+            {
+              "threshold": 0.001794,
+              "tp": 919,
+              "tn": 4846,
+              "fp": 7154,
+              "fn": 4081,
+              "recall": 0.1838,
+              "true_positive_rate": 0.1838,
+              "false_negative_rate": 0.8162,
+              "false_positive_rate": 0.5962,
+              "precision": 0.1138,
+              "f1": 0.1406,
+              "accuracy": 0.3391
+            },
+            {
+              "threshold": 0.003058,
+              "tp": 916,
+              "tn": 5266,
+              "fp": 6734,
+              "fn": 4084,
+              "recall": 0.1832,
+              "true_positive_rate": 0.1832,
+              "false_negative_rate": 0.8168,
+              "false_positive_rate": 0.5612,
+              "precision": 0.1197,
+              "f1": 0.1448,
+              "accuracy": 0.3636
+            },
+            {
+              "threshold": 0.004567,
+              "tp": 898,
+              "tn": 5675,
+              "fp": 6325,
+              "fn": 4102,
+              "recall": 0.1796,
+              "true_positive_rate": 0.1796,
+              "false_negative_rate": 0.8204,
+              "false_positive_rate": 0.5271,
+              "precision": 0.1243,
+              "f1": 0.1469,
+              "accuracy": 0.3866
+            },
+            {
+              "threshold": 0.005839,
+              "tp": 873,
+              "tn": 6074,
+              "fp": 5926,
+              "fn": 4127,
+              "recall": 0.1746,
+              "true_positive_rate": 0.1746,
+              "false_negative_rate": 0.8254,
+              "false_positive_rate": 0.4938,
+              "precision": 0.1284,
+              "f1": 0.148,
+              "accuracy": 0.4086
+            },
+            {
+              "threshold": 0.007193,
+              "tp": 845,
+              "tn": 6472,
+              "fp": 5528,
+              "fn": 4155,
+              "recall": 0.169,
+              "true_positive_rate": 0.169,
+              "false_negative_rate": 0.831,
+              "false_positive_rate": 0.4607,
+              "precision": 0.1326,
+              "f1": 0.1486,
+              "accuracy": 0.4304
+            },
+            {
+              "threshold": 0.008707,
+              "tp": 835,
+              "tn": 6887,
+              "fp": 5113,
+              "fn": 4165,
+              "recall": 0.167,
+              "true_positive_rate": 0.167,
+              "false_negative_rate": 0.833,
+              "false_positive_rate": 0.4261,
+              "precision": 0.1404,
+              "f1": 0.1525,
+              "accuracy": 0.4542
+            },
+            {
+              "threshold": 0.010068,
+              "tp": 825,
+              "tn": 7300,
+              "fp": 4700,
+              "fn": 4175,
+              "recall": 0.165,
+              "true_positive_rate": 0.165,
+              "false_negative_rate": 0.835,
+              "false_positive_rate": 0.3917,
+              "precision": 0.1493,
+              "f1": 0.1568,
+              "accuracy": 0.4779
+            },
+            {
+              "threshold": 0.011537,
+              "tp": 814,
+              "tn": 7714,
+              "fp": 4286,
+              "fn": 4186,
+              "recall": 0.1628,
+              "true_positive_rate": 0.1628,
+              "false_negative_rate": 0.8372,
+              "false_positive_rate": 0.3572,
+              "precision": 0.1596,
+              "f1": 0.1612,
+              "accuracy": 0.5016
+            },
+            {
+              "threshold": 0.012872,
+              "tp": 779,
+              "tn": 8105,
+              "fp": 3895,
+              "fn": 4221,
+              "recall": 0.1558,
+              "true_positive_rate": 0.1558,
+              "false_negative_rate": 0.8442,
+              "false_positive_rate": 0.3246,
+              "precision": 0.1667,
+              "f1": 0.1611,
+              "accuracy": 0.5226
+            },
+            {
+              "threshold": 0.014497,
+              "tp": 771,
+              "tn": 8522,
+              "fp": 3478,
+              "fn": 4229,
+              "recall": 0.1542,
+              "true_positive_rate": 0.1542,
+              "false_negative_rate": 0.8458,
+              "false_positive_rate": 0.2898,
+              "precision": 0.1815,
+              "f1": 0.1667,
+              "accuracy": 0.5466
+            },
+            {
+              "threshold": 0.016345,
+              "tp": 766,
+              "tn": 8941,
+              "fp": 3059,
+              "fn": 4234,
+              "recall": 0.1532,
+              "true_positive_rate": 0.1532,
+              "false_negative_rate": 0.8468,
+              "false_positive_rate": 0.2549,
+              "precision": 0.2003,
+              "f1": 0.1736,
+              "accuracy": 0.571
+            },
+            {
+              "threshold": 0.018953,
+              "tp": 758,
+              "tn": 9358,
+              "fp": 2642,
+              "fn": 4242,
+              "recall": 0.1516,
+              "true_positive_rate": 0.1516,
+              "false_negative_rate": 0.8484,
+              "false_positive_rate": 0.2202,
+              "precision": 0.2229,
+              "f1": 0.1805,
+              "accuracy": 0.5951
+            },
+            {
+              "threshold": 0.022071,
+              "tp": 742,
+              "tn": 9766,
+              "fp": 2234,
+              "fn": 4258,
+              "recall": 0.1484,
+              "true_positive_rate": 0.1484,
+              "false_negative_rate": 0.8516,
+              "false_positive_rate": 0.1862,
+              "precision": 0.2493,
+              "f1": 0.1861,
+              "accuracy": 0.6181
+            },
+            {
+              "threshold": 0.025829,
+              "tp": 676,
+              "tn": 10124,
+              "fp": 1876,
+              "fn": 4324,
+              "recall": 0.1352,
+              "true_positive_rate": 0.1352,
+              "false_negative_rate": 0.8648,
+              "false_positive_rate": 0.1563,
+              "precision": 0.2649,
+              "f1": 0.179,
+              "accuracy": 0.6353
+            },
+            {
+              "threshold": 0.031032,
+              "tp": 563,
+              "tn": 10435,
+              "fp": 1565,
+              "fn": 4437,
+              "recall": 0.1126,
+              "true_positive_rate": 0.1126,
+              "false_negative_rate": 0.8874,
+              "false_positive_rate": 0.1304,
+              "precision": 0.2646,
+              "f1": 0.158,
+              "accuracy": 0.6469
+            },
+            {
+              "threshold": 0.038672,
+              "tp": 489,
+              "tn": 10779,
+              "fp": 1221,
+              "fn": 4511,
+              "recall": 0.0978,
+              "true_positive_rate": 0.0978,
+              "false_negative_rate": 0.9022,
+              "false_positive_rate": 0.1017,
+              "precision": 0.286,
+              "f1": 0.1458,
+              "accuracy": 0.6628
+            },
+            {
+              "threshold": 0.052386,
+              "tp": 413,
+              "tn": 11096,
+              "fp": 904,
+              "fn": 4587,
+              "recall": 0.0826,
+              "true_positive_rate": 0.0826,
+              "false_negative_rate": 0.9174,
+              "false_positive_rate": 0.0753,
+              "precision": 0.3136,
+              "f1": 0.1308,
+              "accuracy": 0.677
+            },
+            {
+              "threshold": 0.078473,
+              "tp": 332,
+              "tn": 11359,
+              "fp": 641,
+              "fn": 4668,
+              "recall": 0.0664,
+              "true_positive_rate": 0.0664,
+              "false_negative_rate": 0.9336,
+              "false_positive_rate": 0.0534,
+              "precision": 0.3412,
+              "f1": 0.1112,
+              "accuracy": 0.6877
+            },
+            {
+              "threshold": 0.115671,
+              "tp": 273,
+              "tn": 11504,
+              "fp": 496,
+              "fn": 4727,
+              "recall": 0.0546,
+              "true_positive_rate": 0.0546,
+              "false_negative_rate": 0.9454,
+              "false_positive_rate": 0.0413,
+              "precision": 0.355,
+              "f1": 0.0946,
+              "accuracy": 0.6928
+            },
+            {
+              "threshold": 0.61293,
+              "tp": 168,
+              "tn": 11586,
+              "fp": 414,
+              "fn": 4832,
+              "recall": 0.0336,
+              "true_positive_rate": 0.0336,
+              "false_negative_rate": 0.9664,
+              "false_positive_rate": 0.0345,
+              "precision": 0.2887,
+              "f1": 0.0602,
+              "accuracy": 0.6914
+            }
+          ],
+          "forced_positive_count": 582,
+          "note": "Report-only threshold analysis. Labels are used after detection to evaluate tradeoffs; the trained unsupervised model threshold is not changed."
+        },
+        "confidence_mean_anomaly": 0.13918638036809816
+      }
+    }
+  ],
+  "decision": {
+    "winner": "PCA + NSA",
+    "reason": "Denoising AE did not produce a strong recall/F1 gain under the configured FPR tolerance."
+  },
+  "total_seconds": 20.095
+}

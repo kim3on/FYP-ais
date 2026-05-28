@@ -4,14 +4,13 @@ import AlertTable from '../../components/AlertTable';
 import { useApp } from '../../hooks/useApp';
 import { initializeNotificationSound, playCompletionSound } from '../../utils/notificationSound';
 import { DATASET_OPTIONS } from './constants';
-import { DatasetSelector, FileDropZone, LogBox, MetricLabel, MetricsGrid, ThresholdSummary } from './shared';
+import { DatasetSelector, FileDropZone, LogBox, MetricLabel, MetricsGrid } from './shared';
 
 
 function DetectionResultPanel({ result, loading }) {
   const alerts = result?.alerts || [];
   const totalFlows = result?.total_checked ?? result?.total_flows ?? alerts.length;
   const anomCount = result ? alerts.filter(a => !a.is_false_positive).length : null;
-  const zdCount = result ? alerts.filter(a => a.is_zero_day || a.attack_type === 'Zero-Day Candidate').length : null;
 
   return (
     <div className="td-result-panel">
@@ -26,12 +25,6 @@ function DetectionResultPanel({ result, loading }) {
             {result ? anomCount.toLocaleString() : '—'}
           </div>
         </div>
-        <div className={`stat-card ${!result ? 'td-skeleton-card' : ''}`} style={{ borderColor: zdCount > 0 ? 'var(--iris-border)' : 'var(--border)', gridColumn: 'span 2' }}>
-          <MetricLabel label="Zero-Day Candidates" className="stat-label iris-label" />
-          <div className="stat-value" style={{ color: zdCount > 0 ? 'var(--iris)' : 'var(--text-primary)' }}>
-            {result ? zdCount.toLocaleString() : '—'}
-          </div>
-        </div>
       </div>
       <div className={`card ${!result ? 'td-result-placeholder' : ''}`}>
         <div className="td-section-label">
@@ -40,7 +33,6 @@ function DetectionResultPanel({ result, loading }) {
         {result ? (
           <>
             <MetricsGrid result={result} />
-            <ThresholdSummary analysis={result.threshold_analysis} />
             {result.accuracy != null ? (
               <p className="td-detail-note" style={{ marginTop: '8px' }}>
                 Verification only: labels were used after detection to score the unsupervised output.
