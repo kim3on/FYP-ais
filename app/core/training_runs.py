@@ -117,6 +117,26 @@ def extract_training_run_record(result: dict) -> dict:
     feature_count = result.get("feature_count", validation.get("n_features"))
     if pca_components is None:
         pca_components = _safe_get(result, "nsa_summary", "n_features", default=_safe_get(result, "iso_summary", "n_features"))
+    representation = (
+        result.get("representation")
+        or _safe_get(result, "model_configs", "representation", default={})
+        or {}
+    )
+    representation_name = (
+        result.get("representation_name")
+        or representation.get("name")
+        or "pca"
+    )
+    representation_display = (
+        result.get("representation_display")
+        or representation.get("display_name")
+        or representation_name.upper()
+    )
+    representation_components = (
+        result.get("representation_components")
+        or representation.get("component_count")
+        or pca_components
+    )
     return {
         "run_id": result.get("run_id"),
         "trained_at": result.get("trained_at"),
@@ -129,6 +149,16 @@ def extract_training_run_record(result: dict) -> dict:
         "benign_row_limit": result.get("benign_row_limit"),
         "feature_count": feature_count,
         "pca_components": pca_components,
+        "representation": {
+            "name": representation_name,
+            "display_name": representation_display,
+            "component_count": representation_components,
+            "dae_latent_dim": representation.get("dae_latent_dim"),
+            "dae_noise_std": representation.get("dae_noise_std"),
+            "experimental": bool(representation.get("experimental", False)),
+        },
+        "representation_name": representation_name,
+        "representation_components": representation_components,
         "split_sizes": {
             "benign_train": split_sizes.get("benign_train"),
             "benign_calibration": split_sizes.get("benign_calibration"),
@@ -183,6 +213,8 @@ def training_records_to_csv(records: Iterable[dict]) -> str:
         "target_fpr",
         "benign_rows_used",
         "feature_count",
+        "representation",
+        "representation_components",
         "pca_components",
         "nsa_mature_detectors",
         "nsa_observed_benign_fpr",
@@ -212,6 +244,8 @@ def training_records_to_csv(records: Iterable[dict]) -> str:
             "target_fpr": record.get("target_fpr"),
             "benign_rows_used": record.get("benign_rows_used"),
             "feature_count": record.get("feature_count"),
+            "representation": _safe_get(record, "representation", "name", default=record.get("representation_name")),
+            "representation_components": record.get("representation_components"),
             "pca_components": record.get("pca_components"),
             "nsa_mature_detectors": nsa.get("mature_detectors"),
             "nsa_observed_benign_fpr": nsa.get("observed_benign_fpr"),

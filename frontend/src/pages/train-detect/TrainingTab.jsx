@@ -17,6 +17,10 @@ export default function TrainingTab() {
     trainTargetFpr, setTrainTargetFpr,
     isoContamination, setIsoContamination,
     isoEstimators, setIsoEstimators,
+    devMode,
+    trainRepresentation, setTrainRepresentation,
+    daeLatentDim, setDaeLatentDim,
+    daeNoiseStd, setDaeNoiseStd,
     trainLogs: logs, setTrainLogs: setLogs,
     setTrainResult: setResult,
     refreshStatus,
@@ -33,8 +37,12 @@ export default function TrainingTab() {
 
   async function handleTrain() {
     if (!file) { setError('Select a dataset file first.'); return; }
+    const representation = canUseDae && trainRepresentation === 'dae' ? 'dae' : 'pca';
+    const safeDaeLatentDim = Math.min(64, Math.max(2, Number(daeLatentDim) || 8));
+    const safeDaeNoiseStd = Math.min(0.20, Math.max(0, Number(daeNoiseStd) || 0));
+    const representationLabel = representation === 'dae' ? 'Denoising AE' : 'PCA';
     const confirmed = window.confirm(
-      `Start training with "${file.name}"?\n\nTarget FPR: ${(trainTargetFpr * 100).toFixed(1)}%\nNSA detectors: ${Number(nDetectors || 0).toLocaleString()}\nIsoFor trees: ${Number(isoEstimators || 0).toLocaleString()}\nThis may take a while and will replace the current trained models for the selected dataset profile.`
+      `Start training with "${file.name}"?\n\nRepresentation: ${representationLabel}\nTarget FPR: ${(trainTargetFpr * 100).toFixed(1)}%\nNSA detectors: ${Number(nDetectors || 0).toLocaleString()}\nIsoFor trees: ${Number(isoEstimators || 0).toLocaleString()}\nThis may take a while and will replace the current trained models for the selected dataset profile.`
     );
     if (!confirmed) return;
     initializeNotificationSound();
@@ -49,6 +57,10 @@ export default function TrainingTab() {
         contamination: isoContamination || 0.05,
         iso_n_estimators: isoEstimators || 100,
         dataset_type: datasetType,
+        representation,
+        ...(representation === 'dae'
+          ? { dae_latent_dim: safeDaeLatentDim, dae_noise_std: safeDaeNoiseStd }
+          : {}),
         ...(benignRowLimit ? { benign_row_limit: benignRowLimit } : {}),
       });
 
@@ -98,6 +110,8 @@ export default function TrainingTab() {
   }, [setResult]);
 
   const datasetOption = DATASET_OPTIONS.find(o => o.id === datasetType) || DATASET_OPTIONS[0];
+  const canUseDae = Boolean(devMode && datasetType === 'cicids2017');
+  const selectedRepresentation = canUseDae && trainRepresentation === 'dae' ? 'dae' : 'pca';
 
   return (
     <div className="tab-body">
@@ -169,6 +183,80 @@ export default function TrainingTab() {
               </div>
             </div>
           </div>
+          {canUseDae && (
+            <div className="card td-dev-card">
+              <div className="td-section-label">Developer Representation</div>
+              <div className="td-representation-toggle" role="group" aria-label="Representation">
+                <button
+                  type="button"
+                  className={`td-representation-option ${selectedRepresentation === 'pca' ? 'active' : ''}`}
+                  onClick={() => setTrainRepresentation('pca')}
+                >
+                  PCA
+                </button>
+                <button
+                  type="button"
+                  className={`td-representation-option ${selectedRepresentation === 'dae' ? 'active' : ''}`}
+                  onClick={() => setTrainRepresentation('dae')}
+                >
+                  Denoising AE
+                </button>
+              </div>
+              {selectedRepresentation === 'dae' && (
+                <div className="td-dev-grid">
+                  <div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MetricLabel label="DAE Latent Dim" className="td-inline-label" />
+                      <input
+                        type="number"
+                        min="2"
+                        max="64"
+                        step="1"
+                        value={daeLatentDim}
+                        onChange={e => setDaeLatentDim(e.target.value === '' ? '' : Math.min(64, Math.max(2, Number(e.target.value) || 8)))}
+                        style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '72px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                      />
+                    </label>
+                    <input
+                      type="range"
+                      min="2"
+                      max="64"
+                      step="1"
+                      value={daeLatentDim || 8}
+                      onChange={e => setDaeLatentDim(Number(e.target.value))}
+                      style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MetricLabel label="DAE Noise Std" className="td-inline-label" />
+                      <input
+                        type="number"
+                        min="0"
+                        max="0.20"
+                        step="0.01"
+                        value={daeNoiseStd}
+                        onChange={e => setDaeNoiseStd(e.target.value === '' ? '' : Math.min(0.20, Math.max(0, Number(e.target.value) || 0)))}
+                        style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '72px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                      />
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.20"
+                      step="0.01"
+                      value={daeNoiseStd || 0}
+                      onChange={e => setDaeNoiseStd(Number(e.target.value))}
+                      style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }}
+                    />
+                  </div>
+                </div>
+              )}
+              <p className="td-detail-note" style={{ marginTop: '8px' }}>
+                Experimental CICIDS2017 representation. Saved retraining artifacts control batch and live detection.
+              </p>
+            </div>
+          )}
           <div className="td-training-param-grid">
             <div className="card">
               <div className="td-section-label">NSA Parameters</div>

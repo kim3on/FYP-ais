@@ -204,6 +204,55 @@
   gap: 14px;
 }
 
+.td-dev-card {
+  border-color: color-mix(in srgb, var(--iris) 35%, var(--border));
+}
+
+.td-representation-toggle {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.td-representation-option {
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 8px 10px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.td-representation-option + .td-representation-option {
+  border-left: 1px solid var(--border);
+}
+
+.td-representation-option:hover {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+.td-representation-option.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.td-dev-grid {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
 .td-detail-value {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -460,6 +509,7 @@
 @media (max-width: 720px) {
   .td-dataset-selector,
   .td-training-param-grid,
+  .td-dev-grid,
   .td-metric-grid {
     grid-template-columns: 1fr;
   }

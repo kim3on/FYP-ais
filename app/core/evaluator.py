@@ -37,7 +37,7 @@ METRIC_EXPLANATIONS = {
     "f1": "F1-score: harmonic mean of precision and recall.",
     "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
     "silhouette_score": (
-        "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. "
+        "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. "
         "It does not prove attack-detection correctness."
     ),
     "self_intrusion_rate": (
@@ -308,7 +308,7 @@ def source_decomposition_metrics(
     Report labelled source-level recall/FPR for AIS decision regions.
 
     D = mature V-detector match, G = self-gap, F = legacy fused-score slot,
-    P = PCA-space self-boundary evidence, R = raw-feature self-boundary evidence.
+    P = representation-space self-boundary evidence, R = raw-feature self-boundary evidence.
     Labels are expected to be used only after prediction for verification.
     """
     y_true = np.asarray(y_true).astype(int)
@@ -392,7 +392,7 @@ def source_decomposition_metrics(
             "D": "mature V-detector match",
             "G": "self-gap fallback",
             "F": "legacy fused-score threshold (disabled for pure NSA)",
-            "P": "PCA-space self-boundary evidence",
+            "P": "representation-space self-boundary evidence",
             "R": "raw-feature self-boundary evidence",
         },
     }
@@ -406,7 +406,7 @@ def compute_silhouette_metric(
     random_state: int = 42,
 ) -> dict:
     """
-    Compute Silhouette Score for predicted normal/anomaly groups in PCA space.
+    Compute Silhouette Score for predicted normal/anomaly groups in saved representation space.
 
     This is an unsupervised separation indicator only; it does not use labels and
     does not prove attack-detection correctness.
@@ -469,7 +469,7 @@ def compute_silhouette_metric(
         "value": round(value, 4),
         "applicable": True,
         "reason": (
-            "Computed from PCA-space features and predicted normal/anomaly groups; "
+            "Computed from saved representation-space features and predicted normal/anomaly groups; "
             "interpret as separation only, not labelled correctness."
         ),
         "n_samples": int(len(labels_eval)),

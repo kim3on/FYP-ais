@@ -33,6 +33,13 @@ function buildComparisonRecord(trainResult) {
     run_id: trainResult.run_id,
     trained_at: trainResult.trained_at,
     target_fpr: nsaCalibration.target_fpr ?? isoCalibration.target_fpr,
+    representation: trainResult.representation || trainResult.model_configs?.representation || {
+      name: trainResult.representation_name || 'pca',
+      display_name: trainResult.representation_display || 'PCA',
+      component_count: trainResult.representation_components || trainResult.pca_components,
+    },
+    representation_name: trainResult.representation_name,
+    representation_components: trainResult.representation_components || trainResult.pca_components,
     models: {
       nsa: {
         mature_detectors: trainResult.nsa_summary?.mature_detectors,
@@ -56,6 +63,8 @@ function buildComparisonRecord(trainResult) {
 function ComparisonPanel({ record }) {
   const nsa = record?.models?.nsa || {};
   const iso = record?.models?.isolation_forest || {};
+  const representation = record?.representation || {};
+  const representationLabel = representation.display_name || record?.representation_name || 'PCA';
   const rows = [
     ['Observed Benign FPR', nsa.observed_benign_fpr, iso.observed_benign_fpr, 'percent'],
     ['Normal Pass Rate', nsa.normal_pass_rate, iso.normal_pass_rate, 'percent'],
@@ -76,7 +85,7 @@ function ComparisonPanel({ record }) {
     <div className="td-comparison-panel">
       <div className="td-section-label">Latest NSA vs IsoFor Comparison</div>
       <div className="td-comparison-meta">
-        Run {record.run_id || 'latest'} · Target FPR {percentValue(record.target_fpr, 1)}
+        Run {record.run_id || 'latest'} · Target FPR {percentValue(record.target_fpr, 1)} · {representationLabel}
       </div>
       <div className="td-comparison-table-wrap">
         <table className="td-comparison-table">
@@ -120,6 +129,10 @@ export default function GlobalTrainingResult() {
     ? (trainResult.iso_calibration_summary || isoSummary.threshold_calibration || {})
     : (trainResult.nsa_calibration_summary || trainResult.calibration_summary || nsaSummary.calibration || {});
   const activeEval = isIso ? (trainResult.iso_eval || {}) : (trainResult.nsa_eval || {});
+  const representation = trainResult.representation || comparisonRecord.representation || {};
+  const representationName = trainResult.representation_display || representation.display_name || 'PCA';
+  const representationComponents = trainResult.representation_components || representation.component_count || trainResult.pca_components;
+  const isDaeRepresentation = (representation.name || trainResult.representation_name) === 'dae';
 
   let datasetName;
   if (trainResult.dataset_display) {
@@ -153,10 +166,16 @@ export default function GlobalTrainingResult() {
       };
 
   const detailMetrics = [
+    ['Representation', representationName, 'var(--accent)'],
+    ['Representation Components', countValue(representationComponents), 'var(--accent)'],
     ['Target FPR', percentValue(targetFpr, 2), 'var(--accent)'],
     ['Observed Benign FPR', percentValue(observedFpr, 2), 'var(--warning)'],
     ['Normal Pass Rate', percentValue(normalPassRate, 2), 'var(--success)'],
     ['Silhouette Score', silhouette != null ? Number(silhouette).toFixed(3) : 'N/A', 'var(--iris)'],
+    ...(isDaeRepresentation ? [
+      ['DAE Latent Dim', countValue(representation.dae_latent_dim), 'var(--iris)'],
+      ['DAE Noise Std', metricValue(representation.dae_noise_std, 2), 'var(--iris)'],
+    ] : []),
     ...(isIso ? [
       ['Contamination Prior', percentValue(isoSummary.contamination ?? modelRecord.contamination, 2), 'var(--accent)'],
       ['Trees / Estimators', countValue(isoSummary.n_estimators ?? modelRecord.estimators), 'var(--accent)'],
@@ -171,8 +190,8 @@ export default function GlobalTrainingResult() {
   ].filter(([, value]) => value !== '—');
 
   const metricsNote = isIso
-    ? 'Fully unsupervised baseline: only BENIGN traffic is used to fit the scaler, PCA, Isolation Forest, and calibrated threshold. Attack labels are report-only.'
-    : 'Fully unsupervised: only BENIGN traffic is used to fit the scaler, train AIS detectors, and calibrate the pure NSA self-gap threshold. Attack labels are report-only.';
+    ? `Fully unsupervised baseline: only BENIGN traffic is used to fit the scaler, ${representationName}, Isolation Forest, and calibrated threshold. Attack labels are report-only.`
+    : `Fully unsupervised: only BENIGN traffic is used to fit the scaler, ${representationName}, train AIS detectors, and calibrate the pure NSA self-gap threshold. Attack labels are report-only.`;
 
   return (
     <div style={{ marginBottom: '24px' }}>

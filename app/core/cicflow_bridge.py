@@ -292,6 +292,7 @@ class CICFlowMeterSniffer:
         self._flow_queue: _queue.Queue = _queue.Queue(maxsize=2000)
         self._dispatch_stop = threading.Event()
         self._dispatch_thread: Optional[threading.Thread] = None
+        self._drain_on_stop = False
 
         self.packets_captured = 0
         self.flows_completed = 0
@@ -361,9 +362,9 @@ class CICFlowMeterSniffer:
             except Exception as exc:
                 self.error = f"Failed to flush CICFlowMeter flows: {exc}"
                 logger.exception("Failed to flush CICFlowMeter flows.")
-        # Stop dispatch thread after optional flushing so already completed
-        # flows drain, without forcing every in-progress flow through detection.
-        self._stop_dispatch_thread()
+        # Stop dispatch thread after optional flushing. A normal UI stop drops
+        # queued backlog instead of replaying it as a sudden alert burst.
+        self._stop_dispatch_thread(drain=flush)
         self._sync_counters()
         logger.info(
             "CICFlowMeterSniffer stopped. Packets=%s, Flows=%s",
@@ -390,26 +391,45 @@ class CICFlowMeterSniffer:
                     continue
                 except Exception:
                     logger.exception("CICFlowMeter dispatch error.")
-            # Drain any remaining items after stop signal.
-            while not self._flow_queue.empty():
-                try:
-                    data = self._flow_queue.get_nowait()
-                    self._adapter.handle_flow(data)
-                except _queue.Empty:
-                    break
-                except Exception:
-                    logger.exception("CICFlowMeter dispatch drain error.")
+            if self._drain_on_stop:
+                # Explicit flush mode drains completed flows before shutdown.
+                while not self._flow_queue.empty():
+                    try:
+                        data = self._flow_queue.get_nowait()
+                        self._adapter.handle_flow(data)
+                    except _queue.Empty:
+                        break
+                    except Exception:
+                        logger.exception("CICFlowMeter dispatch drain error.")
+            else:
+                dropped = self._discard_dispatch_queue()
+                if dropped:
+                    logger.info("Dropped %s queued live flow(s) on capture stop.", dropped)
 
         self._dispatch_thread = threading.Thread(
             target=_dispatch_loop, daemon=True, name="cicflow-dispatch"
         )
         self._dispatch_thread.start()
 
-    def _stop_dispatch_thread(self):
+    def _stop_dispatch_thread(self, drain: bool = False):
+        self._drain_on_stop = bool(drain)
         self._dispatch_stop.set()
         if self._dispatch_thread is not None:
             self._dispatch_thread.join(timeout=5.0)
         self._dispatch_thread = None
+        self._drain_on_stop = False
+
+    def _discard_dispatch_queue(self) -> int:
+        dropped = 0
+        while True:
+            try:
+                self._flow_queue.get_nowait()
+                dropped += 1
+            except _queue.Empty:
+                break
+        if dropped:
+            self._adapter.flows_dropped += dropped
+        return dropped
 
     def _build_session(self):
         from cicflowmeter import flow_session as flow_session_module
@@ -556,9 +576,6 @@ class CICFlowMeterSniffer:
         if collected:
             logger.debug("CICFlowMeter GC emitted %s flow(s).", collected)
         return collected
-
-    def _is_flow_live_ready(self, flow: Any, now: Decimal) -> bool:
-        return self._is_flow_ready(flow, now, terminal_only=False)
 
     def _is_flow_ready(self, flow: Any, now: Decimal, terminal_only: bool) -> bool:
         if self._flow_has_terminal_tcp_flag(flow):
