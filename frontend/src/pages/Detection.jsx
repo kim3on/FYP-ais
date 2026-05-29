@@ -55,7 +55,6 @@ export default function Detection() {
   }
 
   const alerts    = result?.alerts || [];
-  const zdCount   = alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length;
   const anomCount = alerts.filter(a=>!a.is_false_positive).length;
 
   // Metric assessment badge helper
@@ -154,12 +153,6 @@ export default function Detection() {
                 <div className="stat-label" style={{color:'var(--danger)'}}>Anomalies</div>
                 <div className="stat-value" style={{color:anomCount>0?'var(--danger)':'var(--text-primary)'}}>{anomCount}</div>
               </div>
-              {zdCount > 0 && (
-                <div className="stat-card" style={{borderColor:'var(--iris-border)',gridColumn:'span 2'}}>
-                  <div className="stat-label" style={{color:'var(--iris)'}}>⚠ Zero-Day Candidates</div>
-                  <div className="stat-value" style={{color:'var(--iris)'}}>{zdCount}</div>
-                </div>
-              )}
             </div>
 
             {/* Post-run verification metrics */}

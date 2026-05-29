@@ -13,7 +13,7 @@ const MAX_DISPLAY_ALERTS = 500;
 function DetectionResultPanel({ result, loading }) {
   const alerts = result?.alerts || [];
   const totalFlows = result?.total_checked ?? result?.total_flows ?? result?.alerts_total ?? alerts.length;
-  const anomCount = result ? (result.anomalies_found ?? result.alerts_total ?? alerts.length) : null;
+  const anomCount = result ? (result.anomalies_found ?? result.alerts_total ?? alerts.filter(a => !a.is_false_positive).length) : null;
   const zdCount = result ? (result.zero_day_candidates ?? alerts.filter(a => a.is_zero_day || a.attack_type === 'Zero-Day Candidate').length) : null;
 
   return (
@@ -64,7 +64,7 @@ function DetectionResultPanel({ result, loading }) {
               <div />
             </div>
             <p className="td-detail-note">
-                {loading ? 'Detection is running. Results will populate here when the backend completes.' : 'No detection result yet. Run detection to populate this panel.'}
+              {loading ? 'Detection is running. Results will populate here when the backend completes.' : 'No detection result yet. Run detection to populate this panel.'}
             </p>
           </div>
         )}
