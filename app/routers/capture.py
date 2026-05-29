@@ -380,7 +380,7 @@ async def websocket_live(ws: WebSocket, token: Optional[str] = Query(None)):
         "data": {
             "chart_normal":    _state["chart_normal"],
             "chart_anomaly":   _state["chart_anomaly"],
-            "packet_count":    _state["packet_count"],
+            "packet_count":    _live_packet_count(),
             "anomaly_count":   _state["anomaly_count"],
             "flows_completed": _state["flows_completed"],
             "capture_active":  _state["capture_active"],
@@ -420,6 +420,16 @@ def _json_safe(value):
         except Exception:
             return str(value)
     return value
+
+
+def _live_packet_count() -> int:
+    sniffer = _state.get("sniffer")
+    if sniffer is not None:
+        try:
+            return int(getattr(sniffer, "packets_captured", 0) or 0)
+        except Exception:
+            return 0
+    return int(_state.get("packet_count", 0) or 0)
 
 
 def _pcap_to_cicids_csv(payload: bytes, suffix: str, feature_columns: list[str]) -> tuple[bytes, int, list[dict]]:
@@ -553,7 +563,7 @@ async def _broadcast_live_update(result: dict, meta: dict, features: dict):
             "alerts":           result.get("alerts", []),
             "chart_normal":     _state["chart_normal"][-1],
             "chart_anomaly":    _state["chart_anomaly"][-1],
-            "packet_count":     _state["packet_count"],
+            "packet_count":     _live_packet_count(),
             "anomaly_count":    _state["anomaly_count"],
             "flows_completed":  _state["flows_completed"],
             "src_ip":           meta.get("src_ip", ""),

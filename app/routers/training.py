@@ -16,10 +16,14 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile,
 from fastapi.responses import Response
 
 from app.core.pipeline import (
+    MAX_DAE_LATENT_DIM,
+    MAX_DAE_NOISE_STD,
     MAX_BENIGN_ROW_LIMIT,
     MAX_ISO_ESTIMATORS,
     MAX_TRAINING_ATTEMPTS,
     MAX_TRAINING_DETECTORS,
+    MIN_DAE_LATENT_DIM,
+    MIN_DAE_NOISE_STD,
     MIN_BENIGN_ROWS_HARD,
     MIN_ISO_ESTIMATORS,
     MIN_TRAINING_DETECTORS,
@@ -28,6 +32,13 @@ from app.core.pipeline import (
     result_path,
 )
 from app.core.datasets import DATASET_CICIDS2017, DATASET_NSL_KDD, normalize_dataset_type
+from app.core.preprocessor import (
+    DEFAULT_DAE_LATENT_DIM,
+    DEFAULT_DAE_NOISE_STD,
+    REPRESENTATION_DAE,
+    REPRESENTATION_PCA,
+    normalize_representation,
+)
 from app.core.training_runs import (
     extract_training_run_record,
     list_training_run_records,
@@ -58,6 +69,9 @@ async def train(
     target_fpr:     float = 0.10,
     benign_row_limit: int | None = 20_000,
     dataset_type:    str = DATASET_CICIDS2017,
+    representation:  str = REPRESENTATION_PCA,
+    dae_latent_dim:  int = DEFAULT_DAE_LATENT_DIM,
+    dae_noise_std:   float = DEFAULT_DAE_NOISE_STD,
 ):
     """
     Upload a training dataset (CSV or Parquet) and start the training pipeline.
@@ -72,6 +86,7 @@ async def train(
       iso_n_estimators — IsoForest trees             (default 100)
       target_fpr     — target benign false-positive rate for calibration (default 0.10)
       test_size      — train/test split fraction     (default 0.2)
+      representation — pca or dae; dae is CICIDS2017-only experimental mode
     """
     if _state["status"] == "learning":
         raise HTTPException(status_code=409, detail="Training already in progress")
@@ -80,6 +95,15 @@ async def train(
         _dataset_type = normalize_dataset_type(dataset_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        _representation = normalize_representation(representation)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if _dataset_type == DATASET_NSL_KDD and _representation == REPRESENTATION_DAE:
+        raise HTTPException(
+            status_code=400,
+            detail="Denoising AE representation is supported only for CICIDS2017",
+        )
 
     fname = (file.filename or "").lower()
     allowed_exts = (".csv",) if _dataset_type == DATASET_NSL_KDD else ('.csv', '.parquet', '.pq', '')
@@ -105,6 +129,8 @@ async def train(
     _test_size     = float(np.clip(test_size, 0.10, 0.40))
     _n_pca         = int(n_pca_components) if n_pca_components is not None else None
     _target_fpr    = float(np.clip(target_fpr, 0.01, 0.20))
+    _dae_latent_dim = int(np.clip(dae_latent_dim, MIN_DAE_LATENT_DIM, MAX_DAE_LATENT_DIM))
+    _dae_noise_std = float(np.clip(dae_noise_std, MIN_DAE_NOISE_STD, MAX_DAE_NOISE_STD))
     _benign_row_limit = (
         int(np.clip(benign_row_limit, MIN_BENIGN_ROWS_HARD, MAX_BENIGN_ROW_LIMIT))
         if benign_row_limit and benign_row_limit > 0
@@ -125,6 +151,9 @@ async def train(
                 target_fpr=_target_fpr,
                 benign_row_limit=_benign_row_limit,
                 dataset_type=_dataset_type,
+                representation=_representation,
+                dae_latent_dim=_dae_latent_dim,
+                dae_noise_std=_dae_noise_std,
             )
             result = pipeline.run(dataset_bytes, log_callback=log_cb, filename=upload_filename)
             _state["last_result"] = result
@@ -152,6 +181,9 @@ async def train(
             "benign_row_limit": _benign_row_limit,
             "target_fpr": _target_fpr,
             "dataset_type": _dataset_type,
+            "representation": _representation,
+            "dae_latent_dim": _dae_latent_dim,
+            "dae_noise_std": _dae_noise_std,
         },
     }
 

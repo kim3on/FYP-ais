@@ -75,7 +75,7 @@ class DetectionEngine:
     """
     Two-layer AIS detection engine.
 
-    Layer 1a — NSA V-Detector (PCA space): detector match + self-gap.
+    Layer 1a — NSA V-Detector (saved representation space): detector match + self-gap.
     Layer 1b — Self-Boundary (original feature space): Gaussian z-score fences.
     Layer 2  — Attack Attribution: flow-feature heuristics (never uses labels).
 
@@ -85,7 +85,7 @@ class DetectionEngine:
     preprocessor  : fitted CICIDSPreprocessor
     active_model  : "nsa" or "isolation_forest"
     self_boundary : fitted raw-feature SelfBoundaryDetector (optional)
-    pca_self_boundary : fitted PCA-space SelfBoundaryDetector (optional)
+    pca_self_boundary : fitted representation-space SelfBoundaryDetector (optional)
     """
 
     def __init__(
@@ -108,6 +108,7 @@ class DetectionEngine:
         self.dataset_type = normalize_dataset_type(
             getattr(preprocessor, "dataset_type", None)
         )
+        self.representation_metadata = self._preprocessor_representation_summary()
         self.trained_target_fpr = self._trained_target_fpr()
 
     # ------------------------------------------------------------------ #
@@ -281,6 +282,8 @@ class DetectionEngine:
         """Convert raw predictions to structured result with alert objects."""
         alerts = []
         anomaly_indices = np.where(labels == 1)[0]
+        representation_name = self.representation_metadata.get("name") or "pca"
+        representation_label = self.representation_metadata.get("display_name") or "PCA"
 
         for i in anomaly_indices:
             row = df.iloc[i] if i < len(df) else {}
@@ -373,11 +376,11 @@ class DetectionEngine:
             if self._is_isolation_forest():
                 evidence.append("Isolation Forest benign-calibrated anomaly score exceeded")
             if not self._is_isolation_forest() and pca_sb_flags is not None and i < len(pca_sb_flags) and pca_sb_flags[i]:
-                evidence.append("PCA-space self-boundary exceeded benign calibration")
+                evidence.append(f"{representation_label} self-boundary exceeded benign calibration")
             if v_detector_flagged:
                 evidence.append("Mature V-detector matched the flow")
             if self_gap_flagged:
-                evidence.append("PCA NSA self-gap exceeded")
+                evidence.append(f"{representation_label} NSA self-gap exceeded")
             if not self._is_isolation_forest() and not nsa_flagged and not sb_flagged:
                 evidence.append("Benign-calibrated NSA self-gap threshold exceeded")
 
@@ -425,11 +428,20 @@ class DetectionEngine:
             layer1_sources = ["v_detector", "self_gap"]
             score_mode = "self_gap_distance"
             self_boundary_mode = (
-                "evidence_only_pca_raw"
+                (
+                    "evidence_only_pca_raw"
+                    if representation_name == "pca"
+                    else "evidence_only_representation_raw"
+                )
                 if self.pca_self_boundary is not None
                 else ("legacy_raw_scoring" if self.self_boundary is not None else "none")
             )
 
+        representation_components = (
+            int(features.shape[1])
+            if features is not None and len(getattr(features, "shape", ())) > 1
+            else self.representation_metadata.get("component_count")
+        )
         result = {
             "total_checked":      total,
             "row_offset":         int(df.attrs.get("row_offset", 0)) if hasattr(df, "attrs") else 0,
@@ -443,6 +455,13 @@ class DetectionEngine:
             "dataset_type":       self.dataset_type,
             "dataset_display":    dataset_display_name(self.dataset_type),
             "batch_only":         self.dataset_type == DATASET_NSL_KDD,
+            "representation":      {
+                **self.representation_metadata,
+                "component_count": representation_components,
+            },
+            "representation_name": representation_name,
+            "representation_display": representation_label,
+            "representation_components": representation_components,
             "analysed_at":        datetime.now(timezone.utc).isoformat(),
             "metric_explanations": METRIC_EXPLANATIONS,
             "detection_architecture": detection_architecture,
@@ -647,6 +666,28 @@ class DetectionEngine:
         """Return the SB model used for supporting evidence."""
         return self.pca_self_boundary or self.self_boundary
 
+    def _preprocessor_representation_summary(self) -> dict:
+        if hasattr(self.preprocessor, "representation_summary"):
+            try:
+                summary = self.preprocessor.representation_summary()
+                if isinstance(summary, dict):
+                    return summary
+            except Exception:
+                pass
+        pca = getattr(self.preprocessor, "pca_", None)
+        n_components = None
+        if pca is not None:
+            n_components = int(getattr(pca, "n_components_", 0) or 0)
+        elif getattr(self.preprocessor, "feature_columns_", None):
+            n_components = len(self.preprocessor.feature_columns_)
+        return {
+            "name": "pca",
+            "display_name": "PCA",
+            "component_count": int(n_components or 0),
+            "scaler": "RobustScaler",
+            "fitted": bool(getattr(self.preprocessor, "is_fitted_", False)),
+        }
+
     def _is_isolation_forest(self) -> bool:
         return self.active_model == "isolation_forest"
 
@@ -655,7 +696,7 @@ class DetectionEngine:
         X_pca: np.ndarray,
         df_raw: Optional[pd.DataFrame],
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Score the PCA SB when available, otherwise legacy raw SB."""
+        """Score the representation-space SB when available, otherwise legacy raw SB."""
         scoring_sb = self._scoring_self_boundary()
         if scoring_sb is None:
             n = len(X_pca)

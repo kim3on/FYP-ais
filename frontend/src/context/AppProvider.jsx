@@ -23,6 +23,31 @@ function storeJson(key, value) {
   }
 }
 
+function loadInitialDevMode() {
+  const stored = Boolean(loadStoredJson('ais_dev_mode', false));
+  try {
+    const devParam = new URLSearchParams(window.location.search).get('dev');
+    if (devParam === '1') return true;
+    if (devParam === '0') return false;
+  } catch {
+    // Ignore URL parsing failures and keep the stored mode.
+  }
+  return stored;
+}
+
+function alertKey(alert) {
+  return alert?.alert_id || alert?.id || null;
+}
+
+function prependUniqueAlert(prev, alert, limit) {
+  if (!alert) return prev;
+  const key = alertKey(alert);
+  if (key && prev.some(existing => alertKey(existing) === key)) {
+    return prev;
+  }
+  return [alert, ...prev].slice(0, limit);
+}
+
 export function AppProvider({ children }) {
   const [alerts, setAlerts]           = useState([]);
   const [systemStatus, setSystemStatus] = useState(null);
@@ -42,6 +67,12 @@ export function AppProvider({ children }) {
   const [nDetectors, setND]             = useState(3000);
   const [benignRowLimit, setBenignRowLimit] = useState(20000);
   const [trainTargetFpr, setTrainTargetFpr] = useState(() => loadStoredJson('ais_train_target_fpr', 0.10));
+  const [devMode, setDevMode] = useState(() => loadInitialDevMode());
+  const [trainRepresentation, setTrainRepresentation] = useState(() => {
+    return loadInitialDevMode() ? loadStoredJson('ais_train_representation', 'pca') : 'pca';
+  });
+  const [daeLatentDim, setDaeLatentDim] = useState(() => loadStoredJson('ais_dae_latent_dim', 8));
+  const [daeNoiseStd, setDaeNoiseStd] = useState(() => loadStoredJson('ais_dae_noise_std', 0.05));
   const [isoContamination, setIsoContamination] = useState(() => loadStoredJson('ais_iso_contamination', 0.05));
   const [isoEstimators, setIsoEstimators] = useState(() => loadStoredJson('ais_iso_estimators', 100));
   const [trainLogs, setTrainLogs]       = useState([]);
@@ -51,11 +82,27 @@ export function AppProvider({ children }) {
   const [detectLimit, setDetectLimit]   = useState(() => loadStoredJson('ais_detect_limit', 1000));
   const [detectOffset, setDetectOffset] = useState(() => loadStoredJson('ais_detect_offset', 0));
   const [detectLogs, setDetectLogs]     = useState(() => loadStoredJson('ais_detect_logs', []));
-  const [detectResult, setDetectResult] = useState(() => loadStoredJson('ais_detect_result', null));
+  const [detectResult, setDetectResult] = useState(null);
+
+  useEffect(() => {
+    storeJson('ais_dev_mode', Boolean(devMode));
+  }, [devMode]);
 
   useEffect(() => {
     storeJson('ais_train_target_fpr', trainTargetFpr);
   }, [trainTargetFpr]);
+
+  useEffect(() => {
+    storeJson('ais_train_representation', trainRepresentation === 'dae' ? 'dae' : 'pca');
+  }, [trainRepresentation]);
+
+  useEffect(() => {
+    storeJson('ais_dae_latent_dim', daeLatentDim);
+  }, [daeLatentDim]);
+
+  useEffect(() => {
+    storeJson('ais_dae_noise_std', daeNoiseStd);
+  }, [daeNoiseStd]);
 
   useEffect(() => {
     storeJson('ais_iso_contamination', isoContamination);
@@ -78,8 +125,12 @@ export function AppProvider({ children }) {
   }, [detectLogs]);
 
   useEffect(() => {
-    storeJson('ais_detect_result', detectResult);
-  }, [detectResult]);
+    try {
+      localStorage.removeItem('ais_detect_result');
+    } catch {
+      // Ignore storage failures; this only clears old oversized cached results.
+    }
+  }, []);
 
   // Live session state (persists across tab changes)
   const CHART_LEN = 60;
@@ -104,8 +155,8 @@ export function AppProvider({ children }) {
 
   // Push a live alert (called from WebSocket handler)
   const pushAlert = useCallback((alert) => {
-    setAlerts(prev => [alert, ...prev].slice(0, 500)); // Historical
-    setLiveAlerts(prev => [alert, ...prev].slice(0, 200)); // Session
+    setAlerts(prev => prependUniqueAlert(prev, alert, 500)); // Historical
+    setLiveAlerts(prev => prependUniqueAlert(prev, alert, 200)); // Session
   }, []);
 
   // Refresh system status
@@ -163,6 +214,10 @@ export function AppProvider({ children }) {
       theme, setTheme,
       trainFile, setTrainFile, nDetectors, setND, benignRowLimit, setBenignRowLimit,
       trainTargetFpr, setTrainTargetFpr,
+      devMode, setDevMode,
+      trainRepresentation, setTrainRepresentation,
+      daeLatentDim, setDaeLatentDim,
+      daeNoiseStd, setDaeNoiseStd,
       isoContamination, setIsoContamination, isoEstimators, setIsoEstimators,
       trainLogs, setTrainLogs, trainResult, setTrainResult,
       detectFile, setDetectFile, detectLimit, setDetectLimit, detectOffset, setDetectOffset,
