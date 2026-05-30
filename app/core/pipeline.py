@@ -13,6 +13,7 @@ This module is called by the FastAPI /train endpoint.
 """
 
 import os
+import threading
 import joblib
 import numpy as np
 import pandas as pd
@@ -29,7 +30,15 @@ from app.core.datasets import (
     normalize_dataset_type,
 )
 from app.core.nsl_kdd_preprocessor import NSLKDDPreprocessor
-from app.core.preprocessor import CICIDSPreprocessor
+from app.core.preprocessor import (
+    CICIDSPreprocessor,
+    DEFAULT_DAE_LATENT_DIM,
+    DEFAULT_DAE_MAX_ITER,
+    DEFAULT_DAE_NOISE_STD,
+    REPRESENTATION_DAE,
+    REPRESENTATION_PCA,
+    normalize_representation,
+)
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
     assess_metric,
@@ -63,6 +72,12 @@ MAX_TRAINING_ATTEMPTS = 200_000
 MAX_BENIGN_ROW_LIMIT = 100_000
 MIN_ISO_ESTIMATORS = 50
 MAX_ISO_ESTIMATORS = 500
+MIN_DAE_LATENT_DIM = 2
+MAX_DAE_LATENT_DIM = 64
+MIN_DAE_NOISE_STD = 0.0
+MAX_DAE_NOISE_STD = 0.20
+_ARTIFACT_CACHE_LOCK = threading.RLock()
+_ARTIFACT_CACHE: dict[str, tuple[int, int, object]] = {}
 
 
 class TrainingPipeline:
@@ -103,8 +118,15 @@ class TrainingPipeline:
         target_fpr: float = 0.10,
         benign_row_limit: int | None = 20_000,
         dataset_type: str = DATASET_CICIDS2017,
+        representation: str = REPRESENTATION_PCA,
+        dae_latent_dim: int = DEFAULT_DAE_LATENT_DIM,
+        dae_noise_std: float = DEFAULT_DAE_NOISE_STD,
+        dae_max_iter: int = DEFAULT_DAE_MAX_ITER,
     ):
         self.dataset_type = normalize_dataset_type(dataset_type)
+        self.representation = normalize_representation(representation)
+        if self.dataset_type == DATASET_NSL_KDD and self.representation == REPRESENTATION_DAE:
+            raise ValueError("Denoising AE representation is supported only for CICIDS2017")
         self.paths = artifact_paths(self.dataset_type)
         self.r = float(np.clip(r, 0.01, 5.0))
         self.r_s = float(np.clip(r_s, 0.01, 5.0)) if r_s is not None else None
@@ -116,6 +138,9 @@ class TrainingPipeline:
         self.random_state = random_state
         self.n_pca_components = n_pca_components
         self.target_fpr = float(np.clip(target_fpr, 0.01, 0.20))
+        self.dae_latent_dim = int(np.clip(dae_latent_dim, MIN_DAE_LATENT_DIM, MAX_DAE_LATENT_DIM))
+        self.dae_noise_std = float(np.clip(dae_noise_std, MIN_DAE_NOISE_STD, MAX_DAE_NOISE_STD))
+        self.dae_max_iter = int(max(1, dae_max_iter))
         self.benign_row_limit = (
             int(np.clip(benign_row_limit, MIN_BENIGN_ROWS_HARD, MAX_BENIGN_ROW_LIMIT))
             if benign_row_limit and benign_row_limit > 0
@@ -127,7 +152,14 @@ class TrainingPipeline:
     def _make_preprocessor(self):
         if self.dataset_type == DATASET_NSL_KDD:
             return NSLKDDPreprocessor(n_pca_components=self.n_pca_components)
-        return CICIDSPreprocessor(n_pca_components=self.n_pca_components)
+        return CICIDSPreprocessor(
+            n_pca_components=self.n_pca_components,
+            representation=self.representation,
+            dae_latent_dim=self.dae_latent_dim,
+            dae_noise_std=self.dae_noise_std,
+            dae_max_iter=self.dae_max_iter,
+            random_state=self.random_state,
+        )
 
     # ------------------------------------------------------------------ #
     #  MAIN ENTRY POINT                                                    #
@@ -163,6 +195,14 @@ class TrainingPipeline:
         log("[SYSTEM] Initiating training sequence...")
         log(f"[INFO] Dataset profile: {dataset_display_name(self.dataset_type)}")
         preprocessor = self._make_preprocessor()
+        if self.representation == REPRESENTATION_DAE:
+            log(
+                "[INFO] Representation layer: Denoising Autoencoder "
+                f"(dev experiment, latent_dim={self.dae_latent_dim}, noise_std={self.dae_noise_std:.3f}); "
+                "RobustScaler is fitted first on BENIGN training rows."
+            )
+        else:
+            log("[INFO] Representation layer: PCA (default); RobustScaler is fitted first on BENIGN training rows.")
 
         log(f"[INFO] Loading and parsing dataset{' (' + filename + ')' if filename else ''}...")
         df_raw = preprocessor._load(dataset_source, filename=filename)
@@ -221,9 +261,25 @@ class TrainingPipeline:
         )
 
         # ── 3. FIT PREPROCESSOR ON TRAINING DATA ONLY ──────────────────
-        log("[INFO] Fitting feature scaler on BENIGN training rows only...")
+        log("[INFO] Fitting feature scaler and representation layer on BENIGN training rows only...")
         preprocessor.fit(df_train_raw)
         val_stats["n_features"] = len(preprocessor.feature_columns_ or [])
+        if hasattr(preprocessor, "representation_summary"):
+            representation_summary = preprocessor.representation_summary()
+        else:
+            representation_summary = {
+                "name": REPRESENTATION_PCA,
+                "display_name": "PCA",
+                "component_count": 0,
+                "scaler": "RobustScaler",
+                "fitted": True,
+            }
+        representation_label = representation_summary.get("display_name") or "PCA"
+        representation_component_label = (
+            "latent dimensions"
+            if representation_summary.get("name") == REPRESENTATION_DAE
+            else "components"
+        )
         
         # Transform benign-only portions
         X_train, _ = preprocessor.transform_df(df_train_raw)
@@ -258,7 +314,7 @@ class TrainingPipeline:
             f"(z-threshold={raw_sb.z_threshold}, min-violations={raw_sb.min_violations_ratio:.0%})."
         )
 
-        log("[SB] Training PCA-space Self-Boundary detector for supporting evidence...")
+        log(f"[SB] Training {representation_label} self-boundary detector for supporting evidence...")
         X_train_pca_df = preprocessor.pca_dataframe(X_train)
         X_cal_pca_df = preprocessor.pca_dataframe(X_cal)
         X_test_pca_df = preprocessor.pca_dataframe(X_test)
@@ -269,7 +325,8 @@ class TrainingPipeline:
         )
         pca_sb.fit(X_train_pca_df, pca_feature_columns)
         log(
-            f"[OK] PCA Self-Boundary fitted: {pca_sb.n_features_} PCA components modelled "
+            f"[OK] {representation_label} Self-Boundary fitted: "
+            f"{pca_sb.n_features_} {representation_component_label} modelled "
             "(used for supporting evidence)."
         )
 
@@ -319,20 +376,20 @@ class TrainingPipeline:
             f"(observed FPR {raw_sb_calibration['observed_fpr'] * 100:.2f}%)."
         )
 
-        log("[INFO] Calibrating PCA self-boundary on BENIGN calibration rows...")
+        log(f"[INFO] Calibrating {representation_label} self-boundary on BENIGN calibration rows...")
         pca_sb_calibration = pca_sb.calibrate_weighted_threshold(
             X_cal_pca_df,
             target_fpr=self.target_fpr,
         )
         if pca_sb_calibration.get("calibration_reliability") == "experimental":
             warning = (
-                "PCA self-boundary calibration reliability is experimental because the "
+                f"{representation_label} self-boundary calibration reliability is experimental because the "
                 "benign calibration sample is small."
             )
             training_warnings.append(warning)
             log(f"[WARN] {warning}")
         log(
-            f"[OK] PCA self-boundary weighted threshold: {pca_sb_calibration['threshold']:.6f} "
+            f"[OK] {representation_label} self-boundary weighted threshold: {pca_sb_calibration['threshold']:.6f} "
             f"(observed FPR {pca_sb_calibration['observed_fpr'] * 100:.2f}%)."
         )
 
@@ -522,7 +579,8 @@ class TrainingPipeline:
         raw_sb.save(self.paths.self_boundary)
         pca_sb.save(self.paths.pca_self_boundary)
         preprocessor.save(self.paths.preprocessor)
-        log("[OK] Models saved successfully (NSA, ISO, raw SB, PCA SB, Preprocessor).")
+        clear_artifact_cache()
+        log("[OK] Models saved successfully (NSA, ISO, raw SB, representation SB, Preprocessor).")
 
         # ── 9. COMPILE RESULT ──────────────────────────────────────────
         duration = (datetime.now() - t0).total_seconds()
@@ -559,11 +617,16 @@ class TrainingPipeline:
             "dataset_type":     self.dataset_type,
             "dataset_display":  dataset_display_name(self.dataset_type),
             "batch_only":       self.dataset_type == DATASET_NSL_KDD,
+            "representation":    representation_summary,
+            "representation_name": representation_summary.get("name"),
+            "representation_display": representation_summary.get("display_name"),
+            "representation_components": int(X_train.shape[1]) if len(X_train.shape) > 1 else None,
             "nsa_summary":      nsa.summary(),
             "iso_summary":      iso.summary(),
             "sb_summary":       raw_sb.summary(),
             "raw_self_boundary_summary": raw_sb.summary(),
             "pca_self_boundary_summary": pca_sb.summary(),
+            "representation_self_boundary_summary": pca_sb.summary(),
             "nsa_eval":         nsa_eval,
             "nsa_only_eval":    nsa_only_eval,
             "iso_eval":         iso_eval,
@@ -582,6 +645,7 @@ class TrainingPipeline:
                 "attack_rows_available": int(len(df_attack_raw)),
             },
             "model_configs": {
+                "representation": representation_summary,
                 "nsa": {
                     "max_detectors": self.max_detectors,
                     "max_attempts": self.max_attempts,
@@ -598,9 +662,14 @@ class TrainingPipeline:
             "calibration_reliability": calibration_summary.get("calibration_reliability"),
             "nsa_calibration_summary": nsa_calibration,
             "iso_calibration_summary": iso_calibration,
-            "self_boundary_mode": "evidence_only_pca_raw",
+            "self_boundary_mode": (
+                "evidence_only_pca_raw"
+                if representation_summary.get("name") == REPRESENTATION_PCA
+                else "evidence_only_representation_raw"
+            ),
             "self_boundary_calibration_summary": pca_sb_calibration,
             "pca_self_boundary_calibration_summary": pca_sb_calibration,
+            "representation_self_boundary_calibration_summary": pca_sb_calibration,
             "raw_self_boundary_calibration_summary": raw_sb_calibration,
             "post_run_labelled_verification": labelled_verification,
             "iso_post_run_labelled_verification": iso_labelled_verification,
@@ -625,7 +694,7 @@ class TrainingPipeline:
             "detection_architecture": "pure_nsa_v_detector_self_gap",
             "unsupervised_note": (
                 "Labels are used only to select BENIGN self rows and for reporting. "
-                "No attack labels are used to fit PCA/scaler, train detectors, "
+                "No attack labels are used to fit the scaler, representation layer, train detectors, "
                 "train self-boundary, or tune thresholds. The final AIS decision is "
                 "a pure NSA rule: mature V-detector match OR calibrated self-gap. "
                 "Self-boundary models are retained only for alert evidence."
@@ -637,8 +706,10 @@ class TrainingPipeline:
         result["nsa_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
         result["nsa_summary"]["max_detectors"] = self.max_detectors
         result["nsa_summary"]["max_attempts"] = self.max_attempts
+        result["nsa_summary"]["representation"] = representation_summary
         result["iso_summary"]["dataset_type"] = self.dataset_type
         result["iso_summary"]["dataset_name"] = dataset_display_name(self.dataset_type)
+        result["iso_summary"]["representation"] = representation_summary
         result["comparison_record"] = extract_training_run_record(result)
 
         # Persist result to disk for the dashboard to read on reload
@@ -651,6 +722,27 @@ class TrainingPipeline:
 
 
 # ── Convenience functions ────────────────────────────────────────────────
+
+def clear_artifact_cache() -> None:
+    """Invalidate cached model artifacts after retraining or replacement."""
+    with _ARTIFACT_CACHE_LOCK:
+        _ARTIFACT_CACHE.clear()
+
+
+def _load_cached_artifact(path: str, loader):
+    """Load immutable training artifacts once per file version."""
+    abs_path = os.path.abspath(path)
+    stat = os.stat(abs_path)
+    cached_key = (stat.st_mtime_ns, stat.st_size)
+    with _ARTIFACT_CACHE_LOCK:
+        cached = _ARTIFACT_CACHE.get(abs_path)
+        if cached and cached[:2] == cached_key:
+            return cached[2]
+
+    artifact = loader(abs_path)
+    with _ARTIFACT_CACHE_LOCK:
+        _ARTIFACT_CACHE[abs_path] = (cached_key[0], cached_key[1], artifact)
+    return artifact
 
 def _paths_with_legacy_fallback(dataset_type: str | None):
     dataset = normalize_dataset_type(dataset_type)
@@ -673,7 +765,7 @@ def load_nsa(dataset_type: str | None = DATASET_CICIDS2017) -> NegativeSelection
     """Load the trained NSA model if it exists."""
     path = _first_existing_path(dataset_type, "nsa")
     if path:
-        return NegativeSelectionDetector.load(path)
+        return _load_cached_artifact(path, NegativeSelectionDetector.load)
     return None
 
 
@@ -681,7 +773,7 @@ def load_iso(dataset_type: str | None = DATASET_CICIDS2017) -> IsolationForestDe
     """Load the trained Isolation Forest model if it exists."""
     path = _first_existing_path(dataset_type, "iso")
     if path:
-        return IsolationForestDetector.load(path)
+        return _load_cached_artifact(path, IsolationForestDetector.load)
     return None
 
 
@@ -689,7 +781,7 @@ def load_preprocessor(dataset_type: str | None = DATASET_CICIDS2017):
     """Load the fitted preprocessor if it exists."""
     path = _first_existing_path(dataset_type, "preprocessor")
     if path:
-        return joblib.load(path)
+        return _load_cached_artifact(path, joblib.load)
     return None
 
 
@@ -697,7 +789,7 @@ def load_self_boundary(dataset_type: str | None = DATASET_CICIDS2017) -> SelfBou
     """Load the trained raw-feature Self-Boundary detector if it exists."""
     path = _first_existing_path(dataset_type, "self_boundary")
     if path:
-        return SelfBoundaryDetector.load(path)
+        return _load_cached_artifact(path, SelfBoundaryDetector.load)
     return None
 
 
@@ -705,7 +797,7 @@ def load_pca_self_boundary(dataset_type: str | None = DATASET_CICIDS2017) -> Sel
     """Load the trained PCA-space Self-Boundary detector if it exists."""
     path = _first_existing_path(dataset_type, "pca_self_boundary")
     if path:
-        return SelfBoundaryDetector.load(path)
+        return _load_cached_artifact(path, SelfBoundaryDetector.load)
     return None
 
 

@@ -308,6 +308,25 @@ def test_feature_count_reasonable():
     assert 50 <= n <= 90, f"Unexpected feature count: {n}"
     print(f"\n    Feature count after cleaning: {n}")
 
+def test_dae_representation_fit_and_transform():
+    """Experimental DAE representation should encode CICIDS rows to latent space."""
+    csv = _make_cicids_csv(120, 0)
+    prep = CICIDSPreprocessor(
+        representation="dae",
+        dae_latent_dim=4,
+        dae_noise_std=0.01,
+        dae_max_iter=5,
+    )
+    X_normal, y, _ = prep.fit_transform_unsafe_single_dataset(csv)
+    assert prep.is_fitted_
+    assert prep.representation_summary()["name"] == "dae"
+    assert prep.representation_summary()["component_count"] == 4
+    assert X_normal.shape == (120, 4)
+    assert (y == 0).all()
+    X_new, _ = prep.transform(_make_cicids_csv(10, 0))
+    assert X_new.shape == (10, 4)
+    assert np.isfinite(X_new).all()
+
 test("Preprocessor — load CSV, encode labels, split BENIGN/attack",  test_load_and_label)
 test("Preprocessor — mixed fit_transform requires unsafe opt-in",     test_mixed_fit_transform_requires_explicit_unsafe)
 test("Preprocessor — Inf strings cleaned to 0 (CICFlowMeter fix)",   test_no_inf_nan_after_clean)
@@ -320,6 +339,7 @@ test("Preprocessor — inference column alignment",                      test_in
 test("Preprocessor — save/load consistent",                            test_persistence)
 test("Preprocessor — all-BENIGN dataset supported",                   test_benign_only_returns_no_normal_in_X_normal)
 test("Preprocessor — feature count in expected range (~75)",           test_feature_count_reasonable)
+test("Preprocessor — DAE representation encodes CICIDS latent space",  test_dae_representation_fit_and_transform)
 
 
 # ════════════════════════════════════════════════════════════
@@ -759,9 +779,74 @@ def test_pipeline_nsl_kdd_separate_artifacts():
         saved = json.load(f)
     assert saved["dataset_type"] == "nsl_kdd"
 
+def test_pipeline_cicids_dae_representation_reload():
+    """DAE CICIDS training should save artifacts that can be reloaded for detection."""
+    from app.core.detection import DetectionEngine
+    from app.core.pipeline import load_nsa, load_preprocessor
+
+    csv = _make_cicids_csv(n_benign=140, n_attack=20)
+    pipeline = TrainingPipeline(
+        r=0.3, r_s=0.02, max_detectors=30, max_attempts=800,
+        contamination=0.1, test_size=0.25, random_state=17,
+        representation="dae", dae_latent_dim=4, dae_noise_std=0.01,
+        dae_max_iter=5,
+    )
+    result = pipeline.run(csv)
+
+    assert result["representation"]["name"] == "dae"
+    assert result["representation_components"] == 4
+    assert result["model_configs"]["representation"]["dae_latent_dim"] == 4
+    assert result["post_run_labelled_verification"]["verification_only"] is True
+    assert result["post_run_labelled_verification"]["available"] is True
+
+    nsa = load_nsa("cicids2017")
+    prep = load_preprocessor("cicids2017")
+    assert nsa is not None and prep is not None
+    assert prep.representation_summary()["name"] == "dae"
+
+    engine = DetectionEngine(nsa, prep, active_model="nsa")
+    detection = engine.detect_from_csv(_make_cicids_csv(n_benign=10, n_attack=5))
+    assert detection["total_checked"] == 15
+
+def test_pipeline_rejects_dae_for_nsl_kdd():
+    try:
+        TrainingPipeline(dataset_type="nsl_kdd", representation="dae")
+    except ValueError as exc:
+        assert "CICIDS2017" in str(exc)
+    else:
+        raise AssertionError("NSL-KDD should reject DAE representation")
+
+def test_training_api_rejects_dae_for_nsl_kdd():
+    import asyncio
+    from fastapi import BackgroundTasks, HTTPException, UploadFile
+    from app.routers.training import train as train_endpoint
+    from app.state import _state
+
+    previous_status = _state.get("status")
+    _state["status"] = "idle"
+    upload = UploadFile(file=io.BytesIO(_make_nsl_kdd_csv(20, 0)), filename="nsl_fixture.csv")
+    try:
+        try:
+            asyncio.run(train_endpoint(
+                BackgroundTasks(),
+                upload,
+                dataset_type="nsl_kdd",
+                representation="dae",
+            ))
+        except HTTPException as exc:
+            assert exc.status_code == 400
+            assert "CICIDS2017" in str(exc.detail)
+        else:
+            raise AssertionError("Training API should reject NSL-KDD + DAE")
+    finally:
+        _state["status"] = previous_status
+
 test("Pipeline — end-to-end CIC-IDS-2017 training + evaluation", test_pipeline_cicids)
 test("Pipeline — result JSON persisted to disk",                  test_pipeline_result_saved)
 test("Pipeline — NSL-KDD trains into separate artifacts",         test_pipeline_nsl_kdd_separate_artifacts)
+test("Pipeline — CICIDS2017 DAE training reloads for detection",  test_pipeline_cicids_dae_representation_reload)
+test("Pipeline — NSL-KDD rejects DAE representation",             test_pipeline_rejects_dae_for_nsl_kdd)
+test("Training API — NSL-KDD rejects DAE representation",         test_training_api_rejects_dae_for_nsl_kdd)
 
 
 # ════════════════════════════════════════════════════════════

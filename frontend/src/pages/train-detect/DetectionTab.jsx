@@ -7,10 +7,13 @@ import { DATASET_OPTIONS } from './constants';
 import { DatasetSelector, FileDropZone, LogBox, MetricLabel, MetricsGrid } from './shared';
 
 
+const MAX_DISPLAY_ALERTS = 500;
+
+
 function DetectionResultPanel({ result, loading }) {
   const alerts = result?.alerts || [];
-  const totalFlows = result?.total_checked ?? result?.total_flows ?? alerts.length;
-  const anomCount = result ? alerts.filter(a => !a.is_false_positive).length : null;
+  const totalFlows = result?.total_checked ?? result?.total_flows ?? result?.alerts_total ?? alerts.length;
+  const anomCount = result ? (result.anomalies_found ?? result.alerts_total ?? alerts.filter(a => !a.is_false_positive).length) : null;
 
   return (
     <div className="td-result-panel">
@@ -53,7 +56,7 @@ function DetectionResultPanel({ result, loading }) {
               <div />
             </div>
             <p className="td-detail-note">
-              {loading ? 'Detection is running. Results will populate here when the backend completes.' : 'No detection result yet. Run detection to populate this panel; the latest completed result will persist after refresh.'}
+              {loading ? 'Detection is running. Results will populate here when the backend completes.' : 'No detection result yet. Run detection to populate this panel.'}
             </p>
           </div>
         )}
@@ -110,7 +113,7 @@ export default function DetectionTab({ canOperate = true }) {
           if (d.status === 'done' || d.status === 'error') {
             stopPolling();
             setLoading(false);
-            const r = await getDetectionResult().catch(() => null);
+            const r = await getDetectionResult({ alertsLimit: MAX_DISPLAY_ALERTS }).catch(() => null);
             if (r) setResult(r);
             playCompletionSound(d.status === 'error' ? 'error' : 'success');
           }
@@ -130,9 +133,9 @@ export default function DetectionTab({ canOperate = true }) {
   // Fetch existing result on mount & cleanup on unmount
   useEffect(() => {
     let active = true;
-    getDetectionResult()
-      .then(r => { if (active && r) setResult(r); })
-      .catch(() => {});
+    getDetectionResult({ alertsLimit: MAX_DISPLAY_ALERTS }).then(r => {
+      if (active && r) setResult(r);
+    }).catch(() => {});
     return () => {
       active = false;
       stopPolling();
@@ -140,6 +143,8 @@ export default function DetectionTab({ canOperate = true }) {
   }, [setResult]);
 
   const alerts    = result?.alerts || [];
+  const totalAlerts = result?.alerts_total ?? alerts.length;
+  const displayedAlerts = alerts.slice(0, MAX_DISPLAY_ALERTS);
   const datasetOption = DATASET_OPTIONS.find(o => o.id === datasetType) || DATASET_OPTIONS[0];
 
   return (
@@ -199,9 +204,14 @@ export default function DetectionTab({ canOperate = true }) {
 
       {/* Results table */}
       <div className="card">
-        <div className="td-section-label">Detection Results — {alerts.length} alerts</div>
-        {alerts.length > 0 ? (
-          <AlertTable alerts={alerts} />
+        <div className="td-section-label">Detection Results — {totalAlerts.toLocaleString()} alerts</div>
+        {result?.alerts_truncated && (
+          <p className="td-detail-note" style={{ marginBottom: '10px' }}>
+            Showing first {displayedAlerts.length.toLocaleString()} alerts to keep the browser responsive. Full alert history remains in the backend and Alerts page pagination.
+          </p>
+        )}
+        {displayedAlerts.length > 0 ? (
+          <AlertTable alerts={displayedAlerts} />
         ) : (
           <div className="td-empty-results">
             {loading ? 'Waiting for detection output...' : 'No detection alerts to display yet.'}

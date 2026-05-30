@@ -169,10 +169,10 @@ async def detect_logs():
 
 
 @router.get("/result")
-async def detect_result():
+async def detect_result(alerts_limit: Optional[int] = 500):
     """Return the last completed detection result."""
     if _state["last_detect_result"] is not None:
-        return _state["last_detect_result"]
+        return _limit_result_alerts(_state["last_detect_result"], alerts_limit)
     raise HTTPException(status_code=404, detail="No detection result yet")
 
 
@@ -198,3 +198,27 @@ async def detect_sample(features: dict, user=Depends(require_admin_user)):
         _state["alerts"].extend(result["alerts"])
         _state["anomaly_count"] += result["anomalies_found"]
     return result
+
+
+def _limit_result_alerts(result: dict, alerts_limit: Optional[int]) -> dict:
+    alerts = result.get("alerts")
+    if not isinstance(alerts, list) or alerts_limit is None:
+        return result
+
+    limit = max(0, min(int(alerts_limit), 1000))
+    if len(alerts) <= limit:
+        return {
+            **result,
+            "alerts_total": len(alerts),
+            "alerts_returned": len(alerts),
+            "alerts_truncated": False,
+        }
+
+    limited = alerts[:limit]
+    return {
+        **result,
+        "alerts": limited,
+        "alerts_total": len(alerts),
+        "alerts_returned": len(limited),
+        "alerts_truncated": True,
+    }

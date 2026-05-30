@@ -25,6 +25,7 @@ app/static_react/         # React production build output (regenerate with npm r
 app/artefacts/nsa_model.pkl
 app/artefacts/iso_model.pkl
 app/artefacts/preprocessor.pkl
+app/artefacts/nsl_kdd/
 # Keep last_train_result.json so the dashboard shows results on clone
 # app/artefacts/last_train_result.json
 
@@ -39,6 +40,7 @@ cicids2017/
 # Database and training results
 *.db
 app/artefacts/*.json
+app/artefacts/training_runs.jsonl
 
 # ── Logs & temp ───────────────────────────────────────────────────────────
 *.log

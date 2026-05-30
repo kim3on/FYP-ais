@@ -13,6 +13,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func
 
 from app.core.pipeline import (
     engine_ready,
@@ -87,13 +88,17 @@ async def dashboard_stats(user=Depends(get_current_user)):
 
     db = SessionLocal()
     try:
-        all_alerts = db.query(AlertDB).all()
-        total_anomalies = len(all_alerts)
+        total_anomalies = db.query(func.count(AlertDB.id)).scalar() or 0
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for a in all_alerts:
-            sev = (a.severity or "low").lower()
+        rows = (
+            db.query(func.lower(AlertDB.severity), func.count(AlertDB.id))
+            .group_by(func.lower(AlertDB.severity))
+            .all()
+        )
+        for severity, count in rows:
+            sev = (severity or "low").lower()
             if sev in severity_counts:
-                severity_counts[sev] += 1
+                severity_counts[sev] += int(count or 0)
     finally:
         db.close()
 

@@ -160,7 +160,11 @@ export async function detectFromFile(file, limit, offset = 0, params = {}) {
   return res.json();
 }
 export async function getDetectionLogs()   { return apiFetch('/api/detect/logs'); }
-export async function getDetectionResult() { return apiFetch('/api/detect/result'); }
+export async function getDetectionResult(options = {}) {
+  const alertsLimit = options.alertsLimit ?? 500;
+  const query = alertsLimit == null ? '' : `?alerts_limit=${encodeURIComponent(alertsLimit)}`;
+  return apiFetch(`/api/detect/result${query}`);
+}
 
 // ── Capture ───────────────────────────────────────────────────
 export async function getInterfaces()    { return apiFetch('/api/capture/interfaces'); }

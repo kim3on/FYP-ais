@@ -33,8 +33,11 @@ Download: https://www.unb.ca/cic/datasets/ids-2017.html
 
 import io
 import os
+import warnings
 import numpy as np
 import pandas as pd
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import RobustScaler
 import joblib
 
@@ -44,6 +47,33 @@ _LABEL_VARIANTS = [' Label', 'Label', 'label', ' label']
 
 # ── Normal traffic label ──────────────────────────────────────────────
 NORMAL_LABEL = 'BENIGN'
+
+# ── Representation layer options ──────────────────────────────────────
+REPRESENTATION_PCA = "pca"
+REPRESENTATION_DAE = "dae"
+REPRESENTATION_CHOICES = {REPRESENTATION_PCA, REPRESENTATION_DAE}
+DEFAULT_DAE_LATENT_DIM = 8
+DEFAULT_DAE_NOISE_STD = 0.05
+DEFAULT_DAE_HIDDEN_WIDTH = 64
+DEFAULT_DAE_MAX_ITER = 50
+
+
+def normalize_representation(value: str | None) -> str:
+    """Normalize a representation-layer name for training/inference."""
+    name = str(value or REPRESENTATION_PCA).strip().lower().replace("-", "_")
+    aliases = {
+        "pca": REPRESENTATION_PCA,
+        "principal_components": REPRESENTATION_PCA,
+        "dae": REPRESENTATION_DAE,
+        "denoising_ae": REPRESENTATION_DAE,
+        "denoising_autoencoder": REPRESENTATION_DAE,
+        "autoencoder": REPRESENTATION_DAE,
+    }
+    normalized = aliases.get(name)
+    if normalized not in REPRESENTATION_CHOICES:
+        raise ValueError("representation must be 'pca' or 'dae'")
+    return normalized
+
 
 # ── Attack label -> dashboard category ───────────────────────────────
 ATTACK_CATEGORIES = {
@@ -92,9 +122,25 @@ class CICIDSPreprocessor:
         X_scaled, df = prep.transform(csv_path_or_bytes)
     """
 
-    def __init__(self, n_pca_components: float | int | None = 0.95):
+    def __init__(
+        self,
+        n_pca_components: float | int | None = 0.95,
+        representation: str = REPRESENTATION_PCA,
+        dae_latent_dim: int = DEFAULT_DAE_LATENT_DIM,
+        dae_noise_std: float = DEFAULT_DAE_NOISE_STD,
+        dae_hidden_width: int = DEFAULT_DAE_HIDDEN_WIDTH,
+        dae_max_iter: int = DEFAULT_DAE_MAX_ITER,
+        random_state: int = 42,
+    ):
         self.n_pca_components = n_pca_components
+        self.representation = normalize_representation(representation)
+        self.dae_latent_dim = int(np.clip(dae_latent_dim, 2, 64))
+        self.dae_noise_std = float(np.clip(dae_noise_std, 0.0, 0.20))
+        self.dae_hidden_width = int(max(8, dae_hidden_width))
+        self.dae_max_iter = int(max(1, dae_max_iter))
+        self.random_state = int(random_state)
         self.pca_ = None
+        self.dae_ = None
         self.scaler_: RobustScaler | None = None
         self.feature_columns_: list | None = None
         self.is_fitted_: bool = False
@@ -147,16 +193,7 @@ class CICIDSPreprocessor:
         X_all = df_clean[self.feature_columns_].values.astype(np.float32)
         self.scaler_ = RobustScaler()
         X_all_scaled = self.scaler_.fit_transform(X_all)
-
-        if self.n_pca_components:
-            from sklearn.decomposition import PCA
-            max_components = min(X_all_scaled.shape[0], X_all_scaled.shape[1])
-            n_components = self.n_pca_components
-            if isinstance(n_components, int):
-                n_components = max(1, min(int(n_components), max_components))
-            self.pca_ = PCA(n_components=n_components, random_state=42,
-                            svd_solver='full', whiten=True)
-            X_all_scaled = self.pca_.fit_transform(X_all_scaled).astype(np.float32)
+        X_all_scaled = self._fit_transform_representation(X_all_scaled)
 
         self.is_fitted_ = True
         return X_all_scaled[y == 0], y, df_clean
@@ -184,16 +221,7 @@ class CICIDSPreprocessor:
         
         self.scaler_ = RobustScaler()
         X_scaled = self.scaler_.fit_transform(X)
-        
-        if self.n_pca_components:
-            from sklearn.decomposition import PCA
-            max_components = min(X_scaled.shape[0], X_scaled.shape[1])
-            n_components = self.n_pca_components
-            if isinstance(n_components, int):
-                n_components = max(1, min(int(n_components), max_components))
-            self.pca_ = PCA(n_components=n_components, random_state=42,
-                            svd_solver='full', whiten=True)
-            self.pca_.fit(X_scaled)
+        self._fit_representation(X_scaled)
 
         self.is_fitted_ = True
         return self
@@ -227,8 +255,7 @@ class CICIDSPreprocessor:
 
         X = df_numeric[self.feature_columns_].values.astype(np.float32)
         X_scaled = self.scaler_.transform(X)
-        if self.pca_ is not None:
-            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        X_scaled = self._transform_representation(X_scaled)
         return X_scaled, df_numeric
 
     def transform_with_raw(self, source, filename: str = ''):
@@ -278,8 +305,7 @@ class CICIDSPreprocessor:
 
         X = df[self.feature_columns_].values.astype(np.float32)
         X_scaled = self.scaler_.transform(X)
-        if self.pca_ is not None:
-            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        X_scaled = self._transform_representation(X_scaled)
         return X_scaled, df, df_raw_features
 
 
@@ -320,8 +346,7 @@ class CICIDSPreprocessor:
 
         X = df[self.feature_columns_].values.astype(np.float32)
         X_scaled = self.scaler_.transform(X)
-        if self.pca_ is not None:
-            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        X_scaled = self._transform_representation(X_scaled)
         return X_scaled, df
 
 
@@ -334,8 +359,7 @@ class CICIDSPreprocessor:
                 df[col] = 0.0
         X = df[self.feature_columns_].values.astype(np.float32)
         X_scaled = self.scaler_.transform(X)
-        if self.pca_ is not None:
-            X_scaled = self.pca_.transform(X_scaled).astype(np.float32)
+        X_scaled = self._transform_representation(X_scaled)
         return X_scaled
 
     def clean_feature_frame(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -351,26 +375,179 @@ class CICIDSPreprocessor:
         return self._clean(df.copy(), inference=True)
 
     def pca_feature_names(self, n_components: int | None = None) -> list[str]:
-        """Return stable names for PCA-space feature columns."""
+        """Return stable names for representation-space feature columns."""
         if n_components is None:
-            if self.pca_ is not None:
+            if self._representation_name() == REPRESENTATION_DAE and self.dae_ is not None:
+                n_components = int(getattr(self, "dae_latent_dim", DEFAULT_DAE_LATENT_DIM) or 0)
+            elif self.pca_ is not None:
                 n_components = int(getattr(self.pca_, "n_components_", 0) or 0)
             elif self.feature_columns_ is not None:
                 n_components = len(self.feature_columns_)
             else:
                 n_components = 0
-        return [f"PC_{i + 1:03d}" for i in range(int(n_components))]
+        prefix = "AE" if self._representation_name() == REPRESENTATION_DAE else "PC"
+        return [f"{prefix}_{i + 1:03d}" for i in range(int(n_components))]
 
     def pca_dataframe(self, X_pca: np.ndarray) -> pd.DataFrame:
-        """Wrap PCA-space features in a DataFrame for PCA Self-Boundary."""
+        """Wrap representation-space features in a DataFrame for self-boundary."""
         X = np.asarray(X_pca, dtype=np.float64)
         if X.ndim == 1:
             X = X.reshape(1, -1)
         return pd.DataFrame(X, columns=self.pca_feature_names(X.shape[1]))
 
+    def representation_feature_names(self, n_components: int | None = None) -> list[str]:
+        """Explicit alias for representation-space feature names."""
+        return self.pca_feature_names(n_components)
+
+    def representation_dataframe(self, X_representation: np.ndarray) -> pd.DataFrame:
+        """Explicit alias for representation-space self-boundary input."""
+        return self.pca_dataframe(X_representation)
+
+    def representation_display_name(self) -> str:
+        name = self._representation_name()
+        if name == REPRESENTATION_DAE:
+            return "Denoising Autoencoder"
+        return "PCA"
+
+    def representation_summary(self) -> dict:
+        """Return metadata for the saved feature representation layer."""
+        name = self._representation_name()
+        n_components = None
+        if name == REPRESENTATION_DAE:
+            n_components = int(getattr(self, "dae_latent_dim", DEFAULT_DAE_LATENT_DIM))
+        elif self.pca_ is not None:
+            n_components = int(getattr(self.pca_, "n_components_", 0) or 0)
+        elif self.feature_columns_ is not None:
+            n_components = len(self.feature_columns_)
+        summary = {
+            "name": name,
+            "display_name": self.representation_display_name(),
+            "component_count": int(n_components or 0),
+            "scaler": "RobustScaler",
+            "fitted": bool(getattr(self, "is_fitted_", False)),
+        }
+        if name == REPRESENTATION_PCA:
+            summary.update({
+                "pca_components": summary["component_count"],
+                "pca_whiten": True,
+                "n_pca_components_config": getattr(self, "n_pca_components", None),
+            })
+        else:
+            dae = getattr(self, "dae_", None)
+            summary.update({
+                "dae_latent_dim": int(getattr(self, "dae_latent_dim", DEFAULT_DAE_LATENT_DIM)),
+                "dae_noise_std": float(getattr(self, "dae_noise_std", DEFAULT_DAE_NOISE_STD)),
+                "dae_hidden_width": int(getattr(self, "dae_hidden_width", DEFAULT_DAE_HIDDEN_WIDTH)),
+                "dae_max_iter": int(getattr(self, "dae_max_iter", DEFAULT_DAE_MAX_ITER)),
+                "dae_n_iter": int(getattr(dae, "n_iter_", 0) or 0) if dae is not None else None,
+                "experimental": True,
+            })
+        return summary
+
     # ------------------------------------------------------------------ #
     #  INTERNAL                                                            #
     # ------------------------------------------------------------------ #
+
+    def _representation_name(self) -> str:
+        try:
+            return normalize_representation(getattr(self, "representation", REPRESENTATION_PCA))
+        except ValueError:
+            return REPRESENTATION_PCA
+
+    def _fit_transform_representation(self, X_scaled: np.ndarray) -> np.ndarray:
+        self._fit_representation(X_scaled)
+        return self._transform_representation(X_scaled)
+
+    def _fit_representation(self, X_scaled: np.ndarray):
+        X_scaled = np.asarray(X_scaled, dtype=np.float32)
+        self.pca_ = None
+        self.dae_ = None
+
+        if self._representation_name() == REPRESENTATION_DAE:
+            self._fit_dae(X_scaled)
+            return
+
+        if self.n_pca_components:
+            from sklearn.decomposition import PCA
+            self.pca_ = PCA(
+                n_components=self.n_pca_components,
+                random_state=getattr(self, "random_state", 42),
+                svd_solver='full',
+                whiten=True,
+            )
+            self.pca_.fit(X_scaled)
+
+    def _fit_dae(self, X_scaled: np.ndarray):
+        X_scaled = np.asarray(X_scaled, dtype=np.float32)
+        if X_scaled.ndim != 2 or X_scaled.shape[1] == 0:
+            raise ValueError("DAE representation requires a 2D numeric feature matrix")
+
+        n_features = int(X_scaled.shape[1])
+        latent_dim = int(np.clip(getattr(self, "dae_latent_dim", DEFAULT_DAE_LATENT_DIM), 2, min(64, max(2, n_features))))
+        self.dae_latent_dim = latent_dim
+        hidden_width = int(max(getattr(self, "dae_hidden_width", DEFAULT_DAE_HIDDEN_WIDTH), latent_dim * 2))
+        self.dae_hidden_width = hidden_width
+
+        rng = np.random.default_rng(getattr(self, "random_state", 42))
+        noise_std = float(np.clip(getattr(self, "dae_noise_std", DEFAULT_DAE_NOISE_STD), 0.0, 0.20))
+        self.dae_noise_std = noise_std
+        if noise_std > 0:
+            X_noisy = X_scaled + rng.normal(0.0, noise_std, size=X_scaled.shape).astype(np.float32)
+        else:
+            X_noisy = X_scaled.copy()
+
+        early_stopping = len(X_scaled) >= 80
+        model = MLPRegressor(
+            hidden_layer_sizes=(hidden_width, latent_dim, hidden_width),
+            activation="tanh",
+            solver="adam",
+            alpha=1e-4,
+            batch_size="auto",
+            learning_rate_init=1e-3,
+            max_iter=int(getattr(self, "dae_max_iter", DEFAULT_DAE_MAX_ITER)),
+            early_stopping=early_stopping,
+            validation_fraction=0.10,
+            n_iter_no_change=8,
+            random_state=getattr(self, "random_state", 42),
+        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+            model.fit(X_noisy, X_scaled)
+        self.dae_ = model
+
+    def _transform_representation(self, X_scaled: np.ndarray) -> np.ndarray:
+        X_scaled = np.asarray(X_scaled, dtype=np.float32)
+        if self._representation_name() == REPRESENTATION_DAE:
+            if getattr(self, "dae_", None) is None:
+                raise RuntimeError("DAE representation selected but the autoencoder is not fitted")
+            return self._dae_encode(X_scaled)
+
+        if self.pca_ is not None:
+            return self.pca_.transform(X_scaled).astype(np.float32)
+        return X_scaled.astype(np.float32)
+
+    def _dae_encode(self, X_scaled: np.ndarray) -> np.ndarray:
+        model = getattr(self, "dae_", None)
+        if model is None:
+            raise RuntimeError("DAE model is not fitted")
+        if len(getattr(model, "coefs_", [])) < 2:
+            raise RuntimeError("DAE model does not expose an encoder layer")
+
+        layer = np.asarray(X_scaled, dtype=np.float32)
+        for idx in range(2):
+            layer = np.matmul(layer, model.coefs_[idx]) + model.intercepts_[idx]
+            layer = self._dae_activation(layer, getattr(model, "activation", "tanh"))
+        return layer.astype(np.float32)
+
+    @staticmethod
+    def _dae_activation(values: np.ndarray, activation: str) -> np.ndarray:
+        if activation == "identity":
+            return values
+        if activation == "logistic":
+            return 1.0 / (1.0 + np.exp(-values))
+        if activation == "relu":
+            return np.maximum(values, 0.0)
+        return np.tanh(values)
 
     def _load(self, source, filename: str = '') -> pd.DataFrame:
         """
