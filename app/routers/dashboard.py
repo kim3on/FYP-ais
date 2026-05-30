@@ -31,7 +31,7 @@ from app.state import (
     _state,
     save_runtime_settings,
 )
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, require_admin_user
 
 router = APIRouter(tags=["dashboard"])
 
@@ -156,7 +156,7 @@ async def model_summary(user=Depends(get_current_user)):
 
 
 @router.patch("/api/settings")
-async def update_settings(settings: SettingsUpdate, user=Depends(get_current_user)):
+async def update_settings(settings: SettingsUpdate, user=Depends(require_admin_user)):
     """Update runtime settings (active model, alert threshold)."""
     changed = False
     if settings.active_model is not None:

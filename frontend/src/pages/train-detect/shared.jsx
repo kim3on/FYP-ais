@@ -19,7 +19,7 @@ export function MetricLabel({ label, className = 'td-detail-label' }) {
   );
 }
 
-export function DatasetSelector({ value, onChange }) {
+export function DatasetSelector({ value, onChange, disabled = false }) {
   const selected = DATASET_OPTIONS.find(option => option.id === value) || DATASET_OPTIONS[0];
   return (
     <>
@@ -34,6 +34,7 @@ export function DatasetSelector({ value, onChange }) {
             type="button"
             className={`td-dataset-option ${value === option.id ? 'active' : ''}`}
             aria-pressed={value === option.id}
+            disabled={disabled}
             onClick={() => onChange(option.id)}
           >
             <span className="td-dataset-option-head">
@@ -68,16 +69,29 @@ export function LogBox({ lines, height = '220px' }) {
 }
 
 // ── FileDropZone ───────────────────────────────────────────────
-export function FileDropZone({ file, onFile, inputId, icon = '📂', accept = '.csv,.parquet,.pq', dropText = null }) {
+export function FileDropZone({ file, onFile, inputId, icon = '📂', accept = '.csv,.parquet,.pq', dropText = null, disabled = false }) {
   const [dragging, setDragging] = useState(false);
+  const handleFile = (nextFile) => {
+    if (!disabled && nextFile) onFile(nextFile);
+  };
   return (
     <>
       <div
-        className={`drop-zone ${dragging ? 'drag-over' : ''}`}
-        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        className={`drop-zone ${dragging ? 'drag-over' : ''} ${disabled ? 'disabled' : ''}`}
+        aria-disabled={disabled}
+        onDragOver={e => {
+          e.preventDefault();
+          if (!disabled) setDragging(true);
+        }}
         onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
-        onClick={() => document.getElementById(inputId).click()}
+        onDrop={e => {
+          e.preventDefault();
+          setDragging(false);
+          handleFile(e.dataTransfer.files[0]);
+        }}
+        onClick={() => {
+          if (!disabled) document.getElementById(inputId).click();
+        }}
       >
         <div className="drop-icon">{icon}</div>
         {file
@@ -85,7 +99,7 @@ export function FileDropZone({ file, onFile, inputId, icon = '📂', accept = '.
           : <p>{dropText || <>Drop a <span>.csv</span> or <span>.parquet</span> file</>}<br /><small style={{ color: 'var(--text-tertiary)' }}>or click to browse</small></p>
         }
       </div>
-      <input id={inputId} type="file" accept={accept} style={{ display: 'none' }} onChange={e => onFile(e.target.files[0])} />
+      <input id={inputId} type="file" accept={accept} disabled={disabled} style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
     </>
   );
 }
@@ -111,7 +125,6 @@ export function MetricsGrid({ result }) {
     ['Anomaly Rate', result.detection_rate_pct != null ? result.detection_rate_pct / 100 : null],
     ['Normal Flows', result.normal_count, 'count'],
     ['Anomalies', result.anomalies_found, 'count'],
-    ['Zero-Day Candidates', result.zero_day_candidates, 'count'],
   ].filter(([, v]) => v != null);
   const displayRows = rows.length ? rows : unsupervisedRows;
   const counts = [

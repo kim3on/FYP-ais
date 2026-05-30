@@ -34,6 +34,18 @@
   color: var(--text-secondary);
 }
 
+.dashboard-admin-badge {
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
 @media (max-width: 820px) {
   .capture-control-grid {
     grid-template-columns: minmax(0, 1fr);

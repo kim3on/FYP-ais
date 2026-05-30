@@ -27,7 +27,7 @@ from app.core.cicflow_bridge import CICFlowMeterAdapter
 from app.state import _state, _build_engine
 from app.core.database import get_db, SessionLocal
 from app.models.db_models import RawFlowDB, AlertDB
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, require_admin_user
 
 router = APIRouter(tags=["capture"])
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.post("/api/capture/start")
-async def start_capture(interface: Optional[str] = None, user=Depends(get_current_user)):
+async def start_capture(interface: Optional[str] = None, user=Depends(require_admin_user)):
     """
     Start live packet capture on the given interface.
     Requires root/admin privileges and scapy installed.
@@ -193,7 +193,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(get_curren
 
 
 @router.post("/api/capture/stop")
-async def stop_capture(user=Depends(get_current_user)):
+async def stop_capture(user=Depends(require_admin_user)):
     """Stop the live packet capture."""
     if not _state["capture_active"]:
         raise HTTPException(status_code=400, detail="No capture running")
@@ -266,7 +266,7 @@ async def chart_data(user=Depends(get_current_user)):
 
 
 @router.delete("/api/capture/flows")
-async def clear_flows(db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def clear_flows(db: Session = Depends(get_db), user=Depends(require_admin_user)):
     """Clear all raw flows from the database."""
     db.query(RawFlowDB).delete()
     db.commit()
@@ -380,7 +380,7 @@ async def websocket_live(ws: WebSocket, token: Optional[str] = Query(None)):
         "data": {
             "chart_normal":    _state["chart_normal"],
             "chart_anomaly":   _state["chart_anomaly"],
-            "packet_count":    _state["packet_count"],
+            "packet_count":    _live_packet_count(),
             "anomaly_count":   _state["anomaly_count"],
             "flows_completed": _state["flows_completed"],
             "capture_active":  _state["capture_active"],
@@ -420,6 +420,16 @@ def _json_safe(value):
         except Exception:
             return str(value)
     return value
+
+
+def _live_packet_count() -> int:
+    sniffer = _state.get("sniffer")
+    if sniffer is not None:
+        try:
+            return int(getattr(sniffer, "packets_captured", 0) or 0)
+        except Exception:
+            return 0
+    return int(_state.get("packet_count", 0) or 0)
 
 
 def _pcap_to_cicids_csv(payload: bytes, suffix: str, feature_columns: list[str]) -> tuple[bytes, int, list[dict]]:
@@ -553,7 +563,7 @@ async def _broadcast_live_update(result: dict, meta: dict, features: dict):
             "alerts":           result.get("alerts", []),
             "chart_normal":     _state["chart_normal"][-1],
             "chart_anomaly":    _state["chart_anomaly"][-1],
-            "packet_count":     _state["packet_count"],
+            "packet_count":     _live_packet_count(),
             "anomaly_count":    _state["anomaly_count"],
             "flows_completed":  _state["flows_completed"],
             "src_ip":           meta.get("src_ip", ""),

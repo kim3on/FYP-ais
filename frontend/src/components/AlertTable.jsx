@@ -1,10 +1,23 @@
 /**
  * AlertTable — reusable alert table used on Dashboard, Alerts, and Detection pages.
  * Handles zero-day highlighting, severity badges, false-positive marking, and IP blocking.
+ * Paginated to avoid DOM thrashing with large result sets.
  */
+import { useState, useMemo } from 'react';
+
 const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+const PAGE_SIZE = 50;
 
 export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIPs = [], showActions = false }) {
+  const [page, setPage] = useState(0);
+
+  const totalPages = Math.max(1, Math.ceil(alerts.length / PAGE_SIZE));
+  // Reset page when alerts change (e.g. new detection run)
+  const pageAlerts = useMemo(() => {
+    const safeP = Math.min(page, totalPages - 1);
+    return alerts.slice(safeP * PAGE_SIZE, (safeP + 1) * PAGE_SIZE);
+  }, [alerts, page, totalPages]);
+
   if (!alerts.length) {
     return (
       <div style={{ 
@@ -23,6 +36,8 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
     );
   }
 
+  const safePage = Math.min(page, totalPages - 1);
+
   return (
     <div className="table-wrap">
       <table>
@@ -40,16 +55,17 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
           </tr>
         </thead>
         <tbody>
-          {alerts.map((a, i) => {
+          {pageAlerts.map((a, i) => {
             const zd  = a.is_zero_day || a.attack_type === 'Zero-Day Candidate';
             const sev = (a.severity || '').toLowerCase();
-            const srcBlocked = blockedIPs.includes(a.src_ip);
+            const targetIp = a.dst_ip;
+            const targetBlocked = targetIp && blockedIPs.includes(targetIp);
             
             // Format timestamp for better readability
             const ts = a.timestamp ? (a.timestamp.includes('T') ? a.timestamp.split('T')[1].split('.')[0] : a.timestamp) : '—';
             
             return (
-              <tr key={a.alert_id || i} className={zd ? 'zero-day-row' : ''} style={{
+              <tr key={a.alert_id || (safePage * PAGE_SIZE + i)} className={zd ? 'zero-day-row' : ''} style={{
                 background: zd ? 'var(--iris-subtle)' : 'transparent'
               }}>
                 <td style={{ color: 'var(--text-tertiary)', fontWeight: 500 }}>
@@ -68,7 +84,10 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                 </td>
                 <td style={{ color: 'var(--rp-pine)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
                   {a.src_ip || 'N/A'}
-                  {srcBlocked && (
+                </td>
+                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                  {targetIp || 'N/A'}
+                  {targetBlocked && (
                     <span style={{ 
                       marginLeft: '8px', 
                       fontSize: '8px', 
@@ -82,7 +101,6 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                     </span>
                   )}
                 </td>
-                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{a.dst_ip || 'N/A'}</td>
                 <td style={{ fontFamily: 'var(--font-mono)' }}>{a.dst_port || '—'}</td>
                 <td style={{ color: 'var(--text-tertiary)', fontWeight: 600 }}>
                   {(a.protocol || 'N/A').toUpperCase()}
@@ -111,14 +129,14 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                       ) : (
                         <span className="badge normal" style={{ opacity: 0.7 }}>RESOLVED</span>
                       )}
-                      {a.src_ip && a.src_ip !== 'N/A' && !srcBlocked && (
+                      {targetIp && targetIp !== 'N/A' && !targetBlocked && (
                         <button
                           className="btn btn-danger"
                           style={{ fontSize: '10px', padding: '4px 8px' }}
-                          onClick={() => onBlockIP && onBlockIP(a.src_ip, a.attack_type)}
-                          title={`Block ${a.src_ip}`}
+                          onClick={() => onBlockIP && onBlockIP(targetIp, a.attack_type)}
+                          title={`Block target ${targetIp}`}
                         >
-                          Block IP
+                          Block Target
                         </button>
                       )}
                     </div>
@@ -129,6 +147,60 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
           })}
         </tbody>
       </table>
+
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 4px 2px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '11px',
+          color: 'var(--text-tertiary)',
+        }}>
+          <span>
+            Showing {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, alerts.length)} of {alerts.length.toLocaleString()}
+          </span>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: '10px', padding: '4px 10px' }}
+              disabled={safePage === 0}
+              onClick={() => setPage(0)}
+            >
+              ⟪
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: '10px', padding: '4px 10px' }}
+              disabled={safePage === 0}
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+            >
+              ◂ Prev
+            </button>
+            <span style={{ padding: '0 6px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              {safePage + 1} / {totalPages}
+            </span>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: '10px', padding: '4px 10px' }}
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+            >
+              Next ▸
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: '10px', padding: '4px 10px' }}
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setPage(totalPages - 1)}
+            >
+              ⟫
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,7 +16,7 @@ from datetime import datetime
 from app.core.pipeline import engine_ready
 from app.core.datasets import DATASET_CICIDS2017, normalize_dataset_type
 from app.state import _state, _build_engine
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, require_admin_user
 
 router = APIRouter(
     prefix="/api/detect",
@@ -28,6 +28,7 @@ router = APIRouter(
 @router.post("")
 async def detect(
     background_tasks: BackgroundTasks,
+    user=Depends(require_admin_user),
     file: UploadFile = File(...),
     limit: Optional[int] = None,
     offset: Optional[int] = None,
@@ -176,7 +177,7 @@ async def detect_result():
 
 
 @router.post("/sample")
-async def detect_sample(features: dict):
+async def detect_sample(features: dict, user=Depends(require_admin_user)):
     """
     Detect anomaly in a single network flow (JSON body = feature dict).
     Useful for real-time per-packet monitoring from a packet sniffer.

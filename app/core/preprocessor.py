@@ -150,7 +150,11 @@ class CICIDSPreprocessor:
 
         if self.n_pca_components:
             from sklearn.decomposition import PCA
-            self.pca_ = PCA(n_components=self.n_pca_components, random_state=42,
+            max_components = min(X_all_scaled.shape[0], X_all_scaled.shape[1])
+            n_components = self.n_pca_components
+            if isinstance(n_components, int):
+                n_components = max(1, min(int(n_components), max_components))
+            self.pca_ = PCA(n_components=n_components, random_state=42,
                             svd_solver='full', whiten=True)
             X_all_scaled = self.pca_.fit_transform(X_all_scaled).astype(np.float32)
 
@@ -183,7 +187,11 @@ class CICIDSPreprocessor:
         
         if self.n_pca_components:
             from sklearn.decomposition import PCA
-            self.pca_ = PCA(n_components=self.n_pca_components, random_state=42,
+            max_components = min(X_scaled.shape[0], X_scaled.shape[1])
+            n_components = self.n_pca_components
+            if isinstance(n_components, int):
+                n_components = max(1, min(int(n_components), max_components))
+            self.pca_ = PCA(n_components=n_components, random_state=42,
                             svd_solver='full', whiten=True)
             self.pca_.fit(X_scaled)
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getSystemStatus, getModelSummary, updateSettings, clearRawFlows } from '../api';
 import { useApp } from '../hooks/useApp';
+import { useAuth } from '../hooks/useAuth';
 import '../components/Layout/Layout.css';
 import './Settings.css';
 
@@ -88,6 +89,7 @@ function isModelUnavailable(modelInfo, modelId) {
 
 export default function Settings() {
   const { activeModel, setActiveModel, refreshStatus } = useApp();
+  const { currentUser, refreshCurrentUser } = useAuth();
   const [systemStatus, setSystemStatus] = useState(null);
   const [modelInfo, setModelInfo]   = useState(null);
   const [saving, setSaving]         = useState(false);
@@ -96,6 +98,8 @@ export default function Settings() {
   const [error, setError]           = useState('');
   const [clearingDB, setClearingDB] = useState(false);
   const activeReady = systemStatus?.active_engine_ready ?? systemStatus?.models_ready;
+  const role = (currentUser?.role || '').toLowerCase();
+  const canOperate = role.includes('administrator') || role === 'admin';
 
   useEffect(() => {
     getSystemStatus().then(s => {
@@ -110,7 +114,20 @@ export default function Settings() {
     });
   }, [setActiveModel]);
 
+  useEffect(() => {
+    if (!currentUser?.role) {
+      refreshCurrentUser().catch(err => {
+        console.error("Failed to refresh current user:", err);
+      });
+    }
+  }, [currentUser?.role, refreshCurrentUser]);
+
   async function handleSave() {
+    if (!canOperate) {
+      setSaved(false);
+      setError('Administrator role required to change system settings.');
+      return;
+    }
     const model = MODELS.find(m => m.id === activeModel);
     const confirmed = window.confirm(
       `Save detection settings?\n\nActive model: ${model?.name || activeModel}\nZero-day threshold: ${zdThreshold.toFixed(2)}`
@@ -143,6 +160,10 @@ export default function Settings() {
   }
 
   async function handleClearFlows() {
+    if (!canOperate) {
+      alert('Administrator role required to clear raw flows.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to clear all raw flows from the persistent database? This action cannot be undone.')) return;
     setClearingDB(true);
     try {
@@ -162,10 +183,15 @@ export default function Settings() {
           <h1 className="page-title">System Settings</h1>
           <p className="page-subtitle">Runtime detection preferences, model selection, and maintenance controls</p>
         </div>
-        <button className="btn btn-primary settings-save" onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Settings'}
+        <button className="btn btn-primary settings-save" onClick={handleSave} disabled={saving || !canOperate}>
+          {!canOperate ? 'Admin Only' : saving ? 'Saving...' : 'Save Settings'}
         </button>
       </div>
+      {!canOperate && (
+        <div className="settings-access-note">
+          Settings are read-only for this account. Administrator access is required to save changes or clear stored flow data.
+        </div>
+      )}
       {(error || saved) && (
         <div className={`settings-message ${error ? 'error' : 'saved'}`}>
           {error || 'Settings saved'}
@@ -188,7 +214,7 @@ export default function Settings() {
                     type="button"
                     className={`settings-model ${activeModel === model.id ? 'active' : ''}`}
                     onClick={() => setActiveModel(model.id)}
-                    disabled={unavailable || saving}
+                    disabled={!canOperate || unavailable || saving}
                   >
                     <span>{model.name}</span>
                     <small>{unavailable ? 'Train this model before selecting it.' : model.desc}</small>
@@ -225,6 +251,7 @@ export default function Settings() {
                     type="button"
                     className={`settings-preset ${Math.abs(zdThreshold - preset.value) < 0.01 ? 'active' : ''}`}
                     onClick={() => setZdThreshold(preset.value)}
+                    disabled={!canOperate || saving}
                   >
                     {preset.label}
                   </button>
@@ -241,6 +268,7 @@ export default function Settings() {
                   max="0.95"
                   step="0.05"
                   value={zdThreshold}
+                  disabled={!canOperate || saving}
                   onChange={e => setZdThreshold(+parseFloat(e.target.value).toFixed(2))}
                 />
               </div>
@@ -261,7 +289,7 @@ export default function Settings() {
               <button
                 className="btn btn-default settings-danger-action"
                 onClick={handleClearFlows}
-                disabled={clearingDB}
+                disabled={clearingDB || !canOperate}
               >
                 {clearingDB ? <span className="spinner" /> : 'Clear'} Raw Flows Database
               </button>

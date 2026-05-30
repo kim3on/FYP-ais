@@ -9,7 +9,7 @@ import { DatasetSelector, FileDropZone, LogBox, MetricLabel } from './shared';
 // ══════════════════════════════════════════════════════════════
 //  TRAINING TAB
 // ══════════════════════════════════════════════════════════════
-export default function TrainingTab() {
+export default function TrainingTab({ canOperate = true }) {
   const {
     trainFile: file, setTrainFile: setFile,
     nDetectors, setND,
@@ -32,6 +32,7 @@ export default function TrainingTab() {
   }
 
   async function handleTrain() {
+    if (!canOperate) { setError('Administrator role required to start training.'); return; }
     if (!file) { setError('Select a dataset file first.'); return; }
     const confirmed = window.confirm(
       `Start training with "${file.name}"?\n\nTarget FPR: ${(trainTargetFpr * 100).toFixed(1)}%\nNSA detectors: ${Number(nDetectors || 0).toLocaleString()}\nIsoFor trees: ${Number(isoEstimators || 0).toLocaleString()}\nThis may take a while and will replace the current trained models for the selected dataset profile.`
@@ -106,7 +107,7 @@ export default function TrainingTab() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div className="card">
             <div className="td-section-label">Dataset Profile</div>
-            <DatasetSelector value={datasetType} onChange={setDatasetType} />
+            <DatasetSelector value={datasetType} onChange={setDatasetType} disabled={!canOperate} />
             {datasetType === 'nsl_kdd' && (
               <p className="td-detail-note" style={{ marginTop: '8px' }}>
                 NSL-KDD is an offline benchmark path. Live capture remains CICIDS2017-only.
@@ -122,6 +123,7 @@ export default function TrainingTab() {
               icon="📂"
               accept={datasetOption.accept}
               dropText={datasetOption.dropText}
+              disabled={!canOperate}
             />
           </div>
           <div className="card">
@@ -131,10 +133,12 @@ export default function TrainingTab() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>BENIGN Rows —</span>
                   <input type="number" min="100" step="1000" value={benignRowLimit}
+                    disabled={!canOperate}
                     onChange={e => setBenignRowLimit(e.target.value === '' ? '' : Number(e.target.value))}
                     style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '100px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
                 </label>
                 <input type="range" min="1000" max="100000" step="1000" value={benignRowLimit || 20000}
+                  disabled={!canOperate}
                   onChange={e => setBenignRowLimit(Number(e.target.value))}
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
               </div>
@@ -147,6 +151,7 @@ export default function TrainingTab() {
                     max="0.20"
                     step="0.01"
                     value={trainTargetFpr}
+                    disabled={!canOperate}
                     onChange={e => setTrainTargetFpr(Math.min(0.20, Math.max(0.01, Number(e.target.value) || 0.10)))}
                     style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
                   />
@@ -160,6 +165,7 @@ export default function TrainingTab() {
                   max="0.20"
                   step="0.01"
                   value={trainTargetFpr}
+                  disabled={!canOperate}
                   onChange={e => setTrainTargetFpr(Number(e.target.value))}
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }}
                 />
@@ -175,10 +181,11 @@ export default function TrainingTab() {
               <div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>Detectors —</span>
-                  <input type="number" value={nDetectors} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))}
+                  <input type="number" value={nDetectors} disabled={!canOperate} onChange={e => setND(e.target.value === '' ? '' : Number(e.target.value))}
                     style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
                 </label>
                 <input type="range" min="10" max="10000" step="10" value={nDetectors || 3000}
+                  disabled={!canOperate}
                   onChange={e => setND(Number(e.target.value))}
                   style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
                 <p className="td-detail-note" style={{ marginTop: '8px' }}>
@@ -198,6 +205,7 @@ export default function TrainingTab() {
                       max="0.20"
                       step="0.001"
                       value={isoContamination}
+                      disabled={!canOperate}
                       onChange={e => setIsoContamination(Math.min(0.20, Math.max(0.001, Number(e.target.value) || 0.05)))}
                       style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '84px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
                     />
@@ -206,6 +214,7 @@ export default function TrainingTab() {
                     </span>
                   </label>
                   <input type="range" min="0.001" max="0.20" step="0.001" value={isoContamination}
+                    disabled={!canOperate}
                     onChange={e => setIsoContamination(Number(e.target.value))}
                     style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
                 </div>
@@ -213,10 +222,12 @@ export default function TrainingTab() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span>Trees / Estimators —</span>
                     <input type="number" min="50" max="500" step="10" value={isoEstimators}
+                      disabled={!canOperate}
                       onChange={e => setIsoEstimators(e.target.value === '' ? '' : Math.min(500, Math.max(50, Number(e.target.value) || 100)))}
                       style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--accent)', width: '80px', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
                   </label>
                   <input type="range" min="50" max="500" step="10" value={isoEstimators || 100}
+                    disabled={!canOperate}
                     onChange={e => setIsoEstimators(Number(e.target.value))}
                     style={{ padding: 0, cursor: 'pointer', accentColor: 'var(--accent)', marginTop: '8px', width: '100%' }} />
                 </div>
@@ -227,9 +238,9 @@ export default function TrainingTab() {
             </div>
           </div>
           {error && <div className="inline-error">⚠ {error}</div>}
-          <button className="btn btn-primary" onClick={handleTrain} disabled={loading || !file}
+          <button className="btn btn-primary" onClick={handleTrain} disabled={loading || !file || !canOperate}
             style={{ width: '100%', justifyContent: 'center', padding: '10px' }}>
-            {loading ? <><span className="spinner" /> Training…</> : '⚙ Start Training'}
+            {!canOperate ? 'Admin Only' : loading ? <><span className="spinner" /> Training…</> : '⚙ Start Training'}
           </button>
         </div>
         {/* Right */}

@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useApp } from '../hooks/useApp';
+import { useAuth } from '../hooks/useAuth';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
   getAlerts,
@@ -26,7 +27,7 @@ const LINE_OPTS = {
     tooltip: {
       callbacks: {
         label: context => {
-          return `${context.dataset.label}: ${context.parsed.y} packets / flow`;
+          return `${context.dataset.label}: ${context.parsed.y} flows`;
         },
       },
     },
@@ -39,7 +40,7 @@ const LINE_OPTS = {
       border: { display: false },
     },
     y: {
-      title: { display: true, text: 'Packets / flow', color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } },
+      title: { display: true, text: 'Flows', color: '#908caa', font: { family: 'JetBrains Mono', size: 10 } },
       grid: { display: false, drawBorder: false },
       ticks: { color: '#908caa', font: { family: 'JetBrains Mono', size: 10 }, precision: 0 },
       border: { display: false },
@@ -176,6 +177,7 @@ export default function Dashboard() {
     liveAlerts,
     clearLiveSession,
   } = useApp();
+  const { currentUser, refreshCurrentUser } = useAuth();
 
   // Live capture UI state
   const [interfaces, setInterfaces]   = useState([]);
@@ -186,6 +188,16 @@ export default function Dashboard() {
   const [flowSubmitting, setFlowSubmitting] = useState(false);
   const [flowSubmitMessage, setFlowSubmitMessage] = useState('');
   const [flowSubmitError, setFlowSubmitError] = useState('');
+  const role = (currentUser?.role || '').toLowerCase();
+  const canControlCapture = role.includes('administrator') || role === 'admin';
+
+  useEffect(() => {
+    if (!currentUser?.role) {
+      refreshCurrentUser().catch(err => {
+        console.error("Failed to refresh current user:", err);
+      });
+    }
+  }, [currentUser?.role, refreshCurrentUser]);
 
   // WebSocket — active whenever captureRunning is true
   useWebSocket('/ws/live', useCallback((msg) => {
@@ -291,15 +303,20 @@ export default function Dashboard() {
         setCaptureStatus(s);
         setCaptureRunning(s.active || false);
         setLivePktCount(s.packets_captured ?? 0);
+        setLiveFlowCount(s.flows_completed ?? 0);
         setCaptureError(s.sniffer_error || '');
       } catch(err) {
         console.error("Failed to poll capture status:", err);
       }
     }, 2000);
     return () => clearInterval(id);
-  }, [captureRunning, setCaptureRunning, setLivePktCount]);
+  }, [captureRunning, setCaptureRunning, setLiveFlowCount, setLivePktCount]);
 
   async function handleStartCapture() {
+    if (!canControlCapture) {
+      setCaptureError('Administrator role required to start live capture.');
+      return;
+    }
     setCaptureError('');
     try {
       await startCapture(selectedIf);
@@ -310,6 +327,10 @@ export default function Dashboard() {
     } catch(e) { setCaptureError(e.message); }
   }
   async function handleStopCapture() {
+    if (!canControlCapture) {
+      setCaptureError('Administrator role required to stop live capture.');
+      return;
+    }
     try { await stopCapture(); setCaptureRunning(false); } catch(e) { setCaptureError(e.message); }
   }
 
@@ -394,30 +415,29 @@ export default function Dashboard() {
   const combinedTraffic = Array.from({ length: seriesLen }, (_, i) => {
     return (normalSeries[i] ?? 0) + (anomalySeries[i] ?? 0);
   });
-  const anomalyTraffic = combinedTraffic.map((value, i) => (anomalySeries[i] ?? 0) > 0 ? value : null);
+  const anomalyMask = Array.from({ length: seriesLen }, (_, i) => (anomalySeries[i] ?? 0) > 0);
   const trafficData = {
     labels: chartLabels,
     datasets: [
       {
-        label: 'Normal Packets',
+        label: 'Network Flows',
         data: combinedTraffic,
         borderColor: TRAFFIC_NORMAL_COLOR,
         backgroundColor: 'transparent',
         fill: false,
         tension: 0.35,
-        pointRadius: 0,
+        pointRadius: context => anomalyMask[context.dataIndex] ? 3 : 0,
+        pointHoverRadius: context => anomalyMask[context.dataIndex] ? 4 : 0,
+        pointBackgroundColor: context => anomalyMask[context.dataIndex] ? TRAFFIC_ANOMALY_COLOR : TRAFFIC_NORMAL_COLOR,
+        pointBorderColor: context => anomalyMask[context.dataIndex] ? TRAFFIC_ANOMALY_COLOR : TRAFFIC_NORMAL_COLOR,
         borderWidth: 2,
-      },
-      {
-        label: 'Anomalies',
-        data: anomalyTraffic,
-        borderColor: TRAFFIC_ANOMALY_COLOR,
-        backgroundColor: 'transparent',
-        fill: false,
-        tension: 0.35,
-        pointRadius: 0,
-        borderWidth: 2,
-        spanGaps: true,
+        segment: {
+          borderColor: context => {
+            const fromAnomaly = anomalyMask[context.p0DataIndex];
+            const toAnomaly = anomalyMask[context.p1DataIndex];
+            return fromAnomaly || toAnomaly ? TRAFFIC_ANOMALY_COLOR : TRAFFIC_NORMAL_COLOR;
+          },
+        },
       },
     ],
   };
@@ -439,8 +459,10 @@ export default function Dashboard() {
     ? `Live Alerts — ${liveAlerts.length} captured this session`
     : `Recent Alerts — latest ${Math.min(alerts.length,15)} of ${totalAlerts}`;
 
-  // Packet/flow counts — live WS values while capturing, else API counters
-  const displayPkts  = captureRunning ? livePktCount  : (captureStatus?.packets_captured ?? null);
+  // Flow count mirrors completed CICFlowMeter rows; packet count is a lower-level sniffer metric.
+  const displayFlows = captureRunning
+    ? (liveFlowCount || liveRawFlows.length)
+    : (captureStatus?.flows_completed || liveFlowCount || liveRawFlows.length || 0);
 
   // Count anomalies in the last 5 minutes from the relevant alert source
   const alertsSource = captureRunning ? liveAlerts : alerts;
@@ -468,9 +490,9 @@ export default function Dashboard() {
         <StatCard
           icon={<IcoList />} iconColor="#3b82f6"
           topRight={<span style={{ color: 'var(--success)' }}><IcoTrend /></span>}
-          label="Total Packets"
-          value={displayPkts != null ? displayPkts.toLocaleString() : '—'}
-          sub="From live capture session"
+          label="Completed Flows"
+          value={displayFlows.toLocaleString()}
+          sub={livePktCount ? `${livePktCount.toLocaleString()} packets observed` : 'From live capture session'}
           subColor="var(--success)"
         />
         <StatCard
@@ -512,7 +534,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="section-label">Live Network Traffic</div>
           <div className="dash-legend">
-            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:TRAFFIC_NORMAL_COLOR}}/>Normal Packets</div>
+            <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:TRAFFIC_NORMAL_COLOR}}/>Normal Flows</div>
             <div className="dash-legend-item"><span className="dash-legend-dot" style={{background:TRAFFIC_ANOMALY_COLOR}}/>Anomalies</div>
           </div>
           <div style={{height:'150px',marginTop:'10px'}}>
@@ -540,12 +562,15 @@ export default function Dashboard() {
       {/* ── Live Capture Controls ───────────────────────────────── */}
       <div className="card" style={{marginBottom:'16px'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'12px'}}>
-          <div className="section-label" style={{margin:0}}>Live Capture</div>
+          <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+            <div className="section-label" style={{margin:0}}>Live Capture</div>
+            {!canControlCapture && <span className="dashboard-admin-badge">Admin only</span>}
+          </div>
           <div className="capture-control-grid">
             <select
               value={selectedIf}
               onChange={e=>setSelectedIf(e.target.value)}
-              disabled={captureRunning}
+              disabled={captureRunning || !canControlCapture}
               style={{width:'100%',padding:'6px 10px'}}
             >
               {interfaces.length===0
@@ -558,10 +583,10 @@ export default function Dashboard() {
               }
             </select>
             <div className="capture-action-pair">
-              <button className="btn btn-primary" onClick={handleStartCapture} disabled={captureRunning||!selectedIf} style={{width:'100%',justifyContent:'center'}}>
-                ▶ Start
+              <button className="btn btn-primary" onClick={handleStartCapture} disabled={captureRunning||!selectedIf||!canControlCapture} style={{width:'100%',justifyContent:'center'}}>
+                {canControlCapture ? '▶ Start' : 'Admin Only'}
               </button>
-              <button className="btn btn-danger" onClick={handleStopCapture} disabled={!captureRunning} style={{width:'100%',justifyContent:'center'}}>
+              <button className="btn btn-danger" onClick={handleStopCapture} disabled={!captureRunning||!canControlCapture} style={{width:'100%',justifyContent:'center'}}>
                 ■ Stop
               </button>
             </div>

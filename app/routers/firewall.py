@@ -1,7 +1,7 @@
 """
 Firewall Router
 ================
-POST /api/firewall/block       — block an IP via Windows Firewall
+POST /api/firewall/block       — block a remote IP via Windows Firewall
 POST /api/firewall/unblock     — remove a block rule
 GET  /api/firewall/blocked     — list all currently blocked IPs
 """
@@ -60,7 +60,7 @@ def _sanitise_ip(ip: str) -> str:
 @router.post("/block")
 async def block_ip(req: BlockRequest, db: Session = Depends(get_db)):
     """
-    Block an IP address by creating an inbound Windows Firewall rule.
+    Block a remote IP address by creating an outbound Windows Firewall rule.
     Requires the backend to be running with Administrator privileges.
     """
     ip = _sanitise_ip(req.ip)
@@ -71,12 +71,14 @@ async def block_ip(req: BlockRequest, db: Session = Depends(get_db)):
     rule_name = f"{RULE_PREFIX}: {ip}"
 
     try:
-        # Create inbound block rule
+        # Block outbound traffic to the remote target address. For live capture
+        # alerts on this host, src_ip is usually the local machine and dst_ip is
+        # the remote endpoint the analyst wants to contain.
         result = subprocess.run(
             [
                 "powershell", "-NoProfile", "-Command",
                 f'New-NetFirewallRule -DisplayName "{rule_name}" '
-                f'-Direction Inbound -Action Block '
+                f'-Direction Outbound -Action Block '
                 f'-RemoteAddress {ip} '
                 f'-Profile Any '
                 f'-Enabled True',

@@ -24,9 +24,10 @@ class NSACalibrationMixin:
         The final decision rule is:
             v_detector_match OR self_distance > threshold
 
-        Detector matches and self-gap are reported together, but the self-gap
-        cutoff is still calibrated from benign distance quantiles even when the
-        detector path already exceeds the target false-positive budget.
+        Detector matches and self-gap are reported together. When detector
+        matches already consume the target false-positive budget, self-gap is
+        clamped to the strictest benign threshold so it does not add more
+        calibration alerts.
         """
         self._check_fitted()
         if len(X_benign) == 0:
@@ -44,14 +45,29 @@ class NSACalibrationMixin:
             raise ValueError("Cannot calibrate NSA threshold without finite benign scores")
 
         detector_only_fpr = float(detector_matches.mean())
-        residual_fpr_budget = max(target_fpr - detector_only_fpr, 0.0)
-        fallback_self_gap_budget = min(target_fpr * 0.5, 0.05)
-        self_gap_target_fpr = residual_fpr_budget if residual_fpr_budget > 0.0 else fallback_self_gap_budget
         self_gap_scores = scores[~detector_matches]
         if len(self_gap_scores) == 0:
             self_gap_scores = scores
 
-        threshold_info = conformal_threshold(self_gap_scores, self_gap_target_fpr)
+        residual_fpr_budget = target_fpr - detector_only_fpr
+        if residual_fpr_budget <= 0.0:
+            self_gap_target_fpr = 0.0
+            threshold = float(np.max(self_gap_scores))
+            observed_self_gap_fpr = float((self_gap_scores > threshold).mean())
+            threshold_info = {
+                "threshold": threshold,
+                "target_fpr": 0.0,
+                "observed_fpr": observed_self_gap_fpr,
+                "normal_pass_rate": 1.0 - observed_self_gap_fpr,
+                "rank_index": int(len(self_gap_scores)),
+                "rank_index_zero_based": int(len(self_gap_scores) - 1),
+                "n_calibration_samples": int(len(self_gap_scores)),
+                "reliability": calibration_reliability(len(self_gap_scores)),
+            }
+        else:
+            self_gap_target_fpr = residual_fpr_budget
+            threshold_info = conformal_threshold(self_gap_scores, self_gap_target_fpr)
+
         threshold = float(threshold_info["threshold"])
         observed_fpr = float((detector_matches | (scores > threshold)).mean())
         target_achieved = observed_fpr <= target_fpr + 1e-12
@@ -62,8 +78,9 @@ class NSACalibrationMixin:
             )
         elif detector_only_fpr > target_fpr:
             reason = (
-                "V-detector benign match rate exceeds target FPR; self-gap remains "
-                "conformal-calibrated instead of being disabled by a max-distance outlier."
+                "V-detector benign match rate exceeds target FPR; self-gap was "
+                "clamped to the maximum benign non-detector distance so it does "
+                "not add extra calibration FPR."
             )
         else:
             reason = (

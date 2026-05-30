@@ -462,12 +462,28 @@ def test_nsa_calibration_reports_unachievable_detector_fpr():
     assert info["target_achieved"] is False
     assert info["detector_match_fpr"] > info["target_fpr"]
 
+def test_nsa_self_gap_does_not_add_fpr_when_detectors_exceed_target():
+    X_self = np.zeros((10, 1), dtype=np.float32)
+    X_cal = np.arange(100, dtype=np.float32).reshape(-1, 1)
+    nsa = NegativeSelectionDetector(r=0.3, r_s=0.02, max_detectors=0, max_attempts=0)
+    nsa.fit(X_self)
+    nsa.detectors_ = np.array([[0.0]], dtype=np.float32)
+    nsa.det_radii_ = np.array([20.1], dtype=np.float64)
+    nsa._det_sq_ = (nsa.detectors_ * nsa.detectors_).sum(axis=1)
+    info = nsa.calibrate_threshold(X_cal, target_fpr=0.1)
+    labels = nsa.predict(X_cal)
+    assert info["detector_match_fpr"] > info["target_fpr"]
+    assert info["self_gap_target_fpr"] == 0.0
+    assert info["self_gap_only_fpr"] == 0.0
+    assert labels.mean() == info["detector_match_fpr"]
+
 test("NSA — V-Detector fits on CIC-IDS-2017 with variable radii",  test_nsa_on_cicids_features)
 test("NSA — predict_with_scores shape and bounds",                  test_nsa_predict_shape)
 test("NSA — no V-detector sphere overlaps with self (core property)", test_nsa_detectors_dont_match_self)
 test("NSA — pure threshold calibration controls final rule",        test_nsa_pure_threshold_calibration_controls_final_rule)
 test("NSA — detector match is forced positive without fusion",      test_nsa_detector_match_is_forced_positive_without_fusion)
 test("NSA — calibration reports unachievable detector FPR",         test_nsa_calibration_reports_unachievable_detector_fpr)
+test("NSA — self-gap adds no FPR when detectors exceed target",     test_nsa_self_gap_does_not_add_fpr_when_detectors_exceed_target)
 
 
 # ════════════════════════════════════════════════════════════
