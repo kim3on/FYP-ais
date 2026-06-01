@@ -100,6 +100,10 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 
+def _remote_sensor_active() -> bool:
+    return bool(_state.get("remote_sensor_active"))
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  REST ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════
@@ -265,22 +269,27 @@ async def start_capture(interface: Optional[str] = None, user=Depends(require_ad
 @router.post("/api/capture/stop")
 async def stop_capture(user=Depends(require_admin_user)):
     """Stop the live packet capture."""
-    if not _state["capture_active"]:
+    if not _state["capture_active"] and not _remote_sensor_active():
         raise HTTPException(status_code=400, detail="No capture running")
 
     sniffer = _state.get("sniffer")
     packets_captured = sniffer.packets_captured if sniffer else _state["packet_count"]
     if sniffer:
         sniffer.stop(flush=False)
+        _state["sniffer"] = None
 
-    _state["capture_active"] = False
-    _state["remote_sensor_active"] = False
-    _state["sniffer"]        = None
+    remote_stop_requested = False
+    if _remote_sensor_active():
+        _state["remote_sensor_stop_requested"] = True
+        remote_stop_requested = True
+    else:
+        _state["capture_active"] = False
 
     return {
-        "message":          "Capture stopped",
+        "message":          "Remote sensor stop requested" if remote_stop_requested else "Capture stopped",
         "packets_captured": packets_captured,
         "anomalies_found":  _state["anomaly_count"],
+        "remote_sensor_stop_requested": remote_stop_requested,
     }
 
 
@@ -311,6 +320,7 @@ async def capture_status(user=Depends(get_current_user)):
         "flow_mode":        getattr(sniffer, "flow_mode", None) or "none",
         "remote_sensor_active": bool(_state.get("remote_sensor_active")),
         "remote_sensor_last_seen": _state.get("remote_sensor_last_seen"),
+        "remote_sensor_stop_requested": bool(_state.get("remote_sensor_stop_requested")),
     }
 
 
@@ -335,6 +345,42 @@ async def chart_data(user=Depends(get_current_user)):
         "anomaly":         _state["chart_anomaly"],
         "total_packets":   _state["packet_count"],
         "total_anomalies": _state["anomaly_count"],
+    }
+
+
+@router.get("/api/capture/sensor-control")
+async def sensor_control(user=Depends(get_current_user)):
+    """Polled by the local sensor so frontend Stop can request a clean exit."""
+    return {
+        "stop_requested": bool(_state.get("remote_sensor_stop_requested")),
+        "capture_active": bool(_state.get("capture_active")),
+        "server_time": datetime.datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/api/capture/sensor-started")
+async def sensor_started(payload: Optional[dict] = None, user=Depends(require_admin_user)):
+    """Register that a remote local_sensor.py process has started."""
+    _state["capture_active"] = True
+    _state["remote_sensor_active"] = True
+    _state["remote_sensor_stop_requested"] = False
+    _state["remote_sensor_last_seen"] = datetime.datetime.utcnow().isoformat()
+    return {
+        "message": "Remote sensor registered",
+        "sensor": payload or {},
+    }
+
+
+@router.post("/api/capture/sensor-stopped")
+async def sensor_stopped(payload: Optional[dict] = None, user=Depends(require_admin_user)):
+    """Acknowledge that a remote local_sensor.py process has stopped."""
+    _state["remote_sensor_active"] = False
+    _state["remote_sensor_stop_requested"] = False
+    _state["capture_active"] = False
+    _state["remote_sensor_last_seen"] = datetime.datetime.utcnow().isoformat()
+    return {
+        "message": "Remote sensor stopped",
+        "stats": payload or {},
     }
 
 
@@ -365,6 +411,7 @@ async def ingest_remote_flow(payload: dict, user=Depends(require_admin_user)):
 
     _state["capture_active"] = True
     _state["remote_sensor_active"] = True
+    _state["remote_sensor_stop_requested"] = False
     _state["remote_sensor_last_seen"] = datetime.datetime.utcnow().isoformat()
     _state["packet_count"] += 1
     _state["flows_completed"] += 1

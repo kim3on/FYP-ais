@@ -72,7 +72,10 @@ export default function Capture() {
   async function handleStop() {
     try {
       await stopCapture();
-      setCaptureRunning(false);
+      const s = await getCaptureStatus();
+      setStatus(s);
+      setCaptureRunning(s.active || false);
+      setError(s.remote_sensor_stop_requested ? 'Remote sensor stop requested. Waiting for laptop agent to exit.' : '');
     } catch(err) { setError(err.message); }
   }
 

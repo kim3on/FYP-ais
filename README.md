@@ -210,6 +210,9 @@ GET  /api/capture/status  → live counters
 GET  /api/capture/interfaces → available network interfaces
 GET  /api/capture/chartdata  → 60-point ring buffer for polling fallback
 POST /api/capture/ingest-flow → receive completed flow features from a remote laptop/lab sensor
+GET  /api/capture/sensor-control → remote sensor stop-control polling
+POST /api/capture/sensor-started → register remote sensor session
+POST /api/capture/sensor-stopped → clear remote sensor session
 
 WS   /ws/live?token=<jwt> → WebSocket push (snapshot + per-flow updates)
 ```

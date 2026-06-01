@@ -173,7 +173,13 @@ The agent prompts for the AIS-Detect password, captures packets locally, convert
 POST /api/capture/ingest-flow
 ```
 
-The dashboard should then show live counters and alerts from the remote sensor. Use the dashboard Stop button or `Ctrl+C` in the sensor terminal to stop the session.
+The agent also polls:
+
+```text
+GET /api/capture/sensor-control
+```
+
+so the dashboard Stop button can request a clean shutdown. Use either the dashboard Stop button or `Ctrl+C` in the sensor terminal to stop the session.
 
 ## Troubleshooting
 

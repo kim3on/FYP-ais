@@ -37,6 +37,16 @@ def _json_post(url: str, payload: dict, token: str | None = None, timeout: float
     return json.loads(data) if data else {}
 
 
+def _json_get(url: str, token: str | None = None, timeout: float = 15.0) -> dict:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = request.Request(url, headers=headers, method="GET")
+    with request.urlopen(req, timeout=timeout) as resp:
+        data = resp.read().decode("utf-8")
+    return json.loads(data) if data else {}
+
+
 def _login(api_base: str, username: str, password: str) -> str:
     result = _json_post(
         f"{api_base}/api/auth/login",
@@ -84,6 +94,7 @@ def main() -> int:
     parser.add_argument("--interface", help="Local capture interface name. Omit to use Scapy default.")
     parser.add_argument("--list-interfaces", action="store_true", help="List local Scapy interfaces and exit")
     parser.add_argument("--queue-size", type=int, default=2000, help="Max completed flows buffered before dropping")
+    parser.add_argument("--control-interval", type=float, default=2.0, help="Seconds between backend stop-control polls")
     args = parser.parse_args()
 
     if args.list_interfaces:
@@ -135,8 +146,21 @@ def main() -> int:
                     print(f"[sensor] ingest failed: {exc}", file=sys.stderr)
                     break
 
+    def control_poller() -> None:
+        endpoint = f"{api_base}/api/capture/sensor-control"
+        while not stop_event.wait(max(args.control_interval, 0.5)):
+            try:
+                control = _json_get(endpoint, token=token, timeout=10.0)
+                if control.get("stop_requested"):
+                    print("[sensor] remote stop requested by dashboard")
+                    request_stop()
+                    return
+            except Exception as exc:
+                print(f"[sensor] control poll failed: {exc}", file=sys.stderr)
+
     sender_thread = threading.Thread(target=sender, daemon=True, name="sensor-sender")
     sender_thread.start()
+    control_thread = threading.Thread(target=control_poller, daemon=True, name="sensor-control")
 
     sniffer = CICFlowMeterSniffer(
         on_flow_complete=on_flow,
@@ -145,6 +169,8 @@ def main() -> int:
     )
 
     def request_stop(_signum=None, _frame=None) -> None:
+        if stop_event.is_set():
+            return
         stop_event.set()
         sniffer.stop(flush=True)
 
@@ -162,6 +188,13 @@ def main() -> int:
 
     last_sent = 0
     try:
+        _json_post(
+            f"{api_base}/api/capture/sensor-started",
+            {"interface": args.interface or "scapy default"},
+            token=token,
+            timeout=10.0,
+        )
+        control_thread.start()
         while not stop_event.is_set():
             time.sleep(5)
             if stats["sent"] != last_sent:
@@ -173,6 +206,10 @@ def main() -> int:
     finally:
         request_stop()
         sender_thread.join(timeout=10.0)
+        try:
+            _json_post(f"{api_base}/api/capture/sensor-stopped", stats, token=token, timeout=10.0)
+        except Exception as exc:
+            print(f"[sensor] stopped acknowledgement failed: {exc}", file=sys.stderr)
         print(
             "[sensor] stopped. sent={sent} queued={queued} dropped={dropped} "
             "errors={errors} anomalies={anomalies}".format(**stats)

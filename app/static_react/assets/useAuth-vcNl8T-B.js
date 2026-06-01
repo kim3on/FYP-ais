@@ -1,1 +1,0 @@
-import{i as e,n as t}from"./jsx-runtime-ByY1xr43.js";import{n}from"./index-Crl3gzhx.js";var r=e(t(),1);function i(){let e=(0,r.useContext)(n);if(!e)throw Error(`useAuth must be inside AuthProvider`);return e}export{i as t};

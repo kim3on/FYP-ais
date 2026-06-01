@@ -44,6 +44,7 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
       <table>
         <thead>
           <tr>
+            <th>No.</th>
             <th>Timestamp</th>
             <th>Detection Profile</th>
             <th>Source IP</th>
@@ -67,11 +68,15 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
             
             // Format timestamp for better readability
             const ts = a.timestamp ? (a.timestamp.includes('T') ? a.timestamp.split('T')[1].split('.')[0] : a.timestamp) : '—';
+            const rowNumber = alerts.length - (safePage * PAGE_SIZE + i);
             
             return (
               <tr key={a.alert_id || (safePage * PAGE_SIZE + i)} className={zd ? 'zero-day-row' : ''} style={{
                 background: zd ? 'var(--iris-subtle)' : 'transparent'
               }}>
+                <td style={{ color: 'var(--text-tertiary)', fontWeight: 700, fontFamily: 'var(--font-mono)', width: '52px' }}>
+                  {rowNumber}
+                </td>
                 <td style={{ color: 'var(--text-tertiary)', fontWeight: 500 }}>
                   {ts}
                 </td>

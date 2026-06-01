@@ -331,7 +331,13 @@ export default function Dashboard() {
       setCaptureError('Administrator role required to stop live capture.');
       return;
     }
-    try { await stopCapture(); setCaptureRunning(false); } catch(e) { setCaptureError(e.message); }
+    try {
+      await stopCapture();
+      const s = await getCaptureStatus();
+      setCaptureStatus(s);
+      setCaptureRunning(s.active || false);
+      setCaptureError(s.remote_sensor_stop_requested ? 'Remote sensor stop requested. Waiting for laptop agent to exit.' : '');
+    } catch(e) { setCaptureError(e.message); }
   }
 
   async function handleSubmitFlow() {

@@ -54,6 +54,23 @@ ENDPOINT_ROLE_FIELDS = [
     "endpoint_role_reason",
 ]
 
+RAW_ALERT_EXPORT_FIELDS = [
+    "id",
+    "alert_id",
+    "timestamp",
+    "attack_type",
+    "src_ip",
+    "dst_ip",
+    "dst_port",
+    "protocol",
+    "severity",
+    "confidence",
+    "confidence_pct",
+    "is_false_positive",
+    "is_zero_day",
+    "traffic_direction",
+]
+
 
 def _require_export_role(user):
     """Allow administrator and analyst roles to export alert analysis."""
@@ -492,7 +509,7 @@ async def export_raw_alerts_csv(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """Export a raw flat alert list CSV containing all DB fields."""
+    """Export a raw flat alert list CSV through traffic direction."""
     _require_export_role(user)
     alerts = (
         _base_alert_query(
@@ -506,13 +523,7 @@ async def export_raw_alerts_csv(
     output = StringIO()
     writer = csv.writer(output, lineterminator="\n")
     
-    # Headers
-    headers = [
-        "id", "alert_id", "timestamp", "attack_type", "src_ip", "dst_ip", 
-        "dst_port", "protocol", "severity", "confidence", "confidence_pct", 
-        "is_false_positive", "is_zero_day", *ENDPOINT_ROLE_FIELDS
-    ]
-    writer.writerow(headers)
+    writer.writerow(RAW_ALERT_EXPORT_FIELDS)
     
     for alert in alerts:
         row = [
@@ -529,7 +540,7 @@ async def export_raw_alerts_csv(
             alert.confidence_pct,
             "Yes" if alert.is_false_positive else "No",
             "Yes" if alert.is_zero_day else "No",
-            *[getattr(alert, field, "") for field in ENDPOINT_ROLE_FIELDS],
+            getattr(alert, "traffic_direction", "") or "",
         ]
         writer.writerow([_csv_safe(cell) for cell in row])
 

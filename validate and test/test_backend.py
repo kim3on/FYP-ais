@@ -856,7 +856,7 @@ from app.core.detection import DetectionEngine
 from app.core.endpoint_roles import infer_endpoint_roles
 from app.core.pipeline import load_nsa, load_preprocessor, load_self_boundary, load_pca_self_boundary
 from app.models.db_models import AlertDB
-from app.routers.alerts import ENDPOINT_ROLE_FIELDS as ALERT_EXPORT_ROLE_FIELDS
+from app.routers.alerts import ENDPOINT_ROLE_FIELDS as ALERT_EXPORT_ROLE_FIELDS, RAW_ALERT_EXPORT_FIELDS
 
 def test_detection_result_structure():
     """Detection should return correct keys and alert structure."""
@@ -1029,6 +1029,11 @@ def test_alert_export_endpoint_role_fields():
     }
     assert required.issubset(set(ALERT_EXPORT_ROLE_FIELDS))
 
+def test_raw_alert_export_stops_at_traffic_direction():
+    assert RAW_ALERT_EXPORT_FIELDS[-1] == "traffic_direction"
+    assert "flow_initiator_ip" not in RAW_ALERT_EXPORT_FIELDS
+    assert "local_ip" not in RAW_ALERT_EXPORT_FIELDS
+
 test("Detection — result structure has all required keys",          test_detection_result_structure)
 test("Detection — every alert has required fields & valid severity", test_detection_alert_fields)
 test("Detection — Isolation Forest model also works",               test_detection_with_iso_model)
@@ -1036,6 +1041,7 @@ test("Detection — NSL-KDD batch verification works",                test_detec
 test("Endpoint roles — inbound/outbound direction inference",       test_endpoint_role_inference)
 test("Endpoint roles — AlertDB persists nullable role columns",      test_alert_db_endpoint_role_columns)
 test("Endpoint roles — CSV export includes role fields",            test_alert_export_endpoint_role_fields)
+test("Endpoint roles — raw CSV stops at traffic direction",         test_raw_alert_export_stops_at_traffic_direction)
 
 
 # ════════════════════════════════════════════════════════════
