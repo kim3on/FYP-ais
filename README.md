@@ -233,7 +233,8 @@ The CSV export is generated from the SQLite alert database, not only the visible
 frontend table. It is a sectioned triage report with a report overview, severity,
 attack-family and direction summaries, top sources/targets, top remote endpoints,
 repeated endpoint pairs, priority incidents, and an action legend for FYP reporting
-and analyst review.
+and analyst review. Both the summary export and raw alert export include
+blocklist status/mode metadata for matching remote endpoints.
 
 ### Dashboard & Settings
 ```

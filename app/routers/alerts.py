@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
-from app.models.db_models import AlertDB
+from app.models.db_models import AlertDB, BlockedIPDB
 from app.routers.auth import get_current_user
 
 router = APIRouter(
@@ -69,6 +69,13 @@ RAW_ALERT_EXPORT_FIELDS = [
     "is_false_positive",
     "is_zero_day",
     "traffic_direction",
+    "local_ip",
+    "remote_ip",
+    "containment_target_ip",
+    "is_blocklisted",
+    "blocklist_mode",
+    "blocklisted_at",
+    "blocklist_reason",
 ]
 
 
@@ -109,6 +116,49 @@ def _endpoint_key(alert: AlertDB) -> tuple[str, str, str, str]:
         str(alert.dst_port or "N/A"),
         alert.protocol or "N/A",
     )
+
+
+def _blocklist_mode(rule_name: str) -> str:
+    return "windows_firewall" if str(rule_name or "").startswith("AIS-Detect Block:") else "blocklist_only"
+
+
+def _load_blocklist(db: Session) -> dict[str, dict]:
+    entries = db.query(BlockedIPDB).all()
+    return {
+        entry.ip: {
+            "ip": entry.ip,
+            "blocked_at": entry.blocked_at,
+            "reason": entry.reason,
+            "rule_name": entry.rule_name,
+            "mode": _blocklist_mode(entry.rule_name),
+        }
+        for entry in entries
+    }
+
+
+def _alert_blocklist_ip(alert: AlertDB) -> str:
+    candidates = [
+        getattr(alert, "remote_ip", None),
+        getattr(alert, "containment_target_ip", None),
+        getattr(alert, "dst_ip", None),
+    ]
+    for value in candidates:
+        text = str(value or "").strip()
+        if text and text.upper() not in {"N/A", "?", "UNKNOWN"}:
+            return text
+    return ""
+
+
+def _blocklist_info(alert: AlertDB, blocklist: dict[str, dict]) -> dict:
+    ip = _alert_blocklist_ip(alert)
+    entry = blocklist.get(ip) if ip else None
+    return {
+        "blocklist_ip": ip,
+        "is_blocklisted": bool(entry),
+        "blocklist_mode": (entry or {}).get("mode", ""),
+        "blocklisted_at": (entry or {}).get("blocked_at", ""),
+        "blocklist_reason": (entry or {}).get("reason", ""),
+    }
 
 
 def _risk_score(alert: AlertDB, repeat_count: int) -> int:
@@ -217,7 +267,7 @@ def _mode(values) -> str:
     return Counter(clean).most_common(1)[0][0]
 
 
-def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: str) -> dict:
+def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: str, blocklist: dict[str, dict]) -> dict:
     endpoint_counts = Counter(_endpoint_key(alert) for alert in alerts)
     records = []
 
@@ -235,12 +285,15 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             "endpoint": endpoint,
             "repeat_count": repeat_count,
             "action_code": _action_code(alert, family, repeat_count, risk),
+            "blocklist": _blocklist_info(alert, blocklist),
         })
 
     total = len(records)
     false_positive_count = sum(1 for item in records if item["alert"].is_false_positive)
     zero_day_count = sum(1 for item in records if item["alert"].is_zero_day)
     actionable_count = sum(1 for item in records if not item["alert"].is_false_positive)
+    blocklisted_alert_count = sum(1 for item in records if item["blocklist"]["is_blocklisted"])
+    blocklisted_remote_count = len({item["blocklist"]["blocklist_ip"] for item in records if item["blocklist"]["is_blocklisted"]})
     sorted_alerts = sorted(alerts, key=lambda alert: _parse_timestamp_for_sort(alert.timestamp or ""))
     filter_text = ", ".join(
         f"{key}={value}" for key, value in filters.items()
@@ -258,6 +311,8 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         ["false_positive_count", false_positive_count],
         ["zero_day_count", zero_day_count],
         ["actionable_alerts", actionable_count],
+        ["blocklisted_alerts", blocklisted_alert_count],
+        ["blocklisted_remote_endpoints", blocklisted_remote_count],
     ]
     if total == 0:
         report_overview.append(["note", "No alerts matched this export filter"])
@@ -328,6 +383,7 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
     top_remote_endpoints = []
     for remote_ip, items in sorted(by_remote.items(), key=lambda pair: group_sort_key(pair[1]))[:10]:
         alerts_in_group = [item["alert"] for item in items]
+        blocklist_entry = blocklist.get(remote_ip)
         top_remote_endpoints.append([
             remote_ip,
             len(items),
@@ -336,6 +392,24 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             _max_severity(alerts_in_group),
             max(item["risk"] for item in items),
             _mode(getattr(alert, "traffic_direction", None) for alert in alerts_in_group),
+            "Yes" if blocklist_entry else "No",
+            (blocklist_entry or {}).get("mode", ""),
+            (blocklist_entry or {}).get("blocked_at", ""),
+        ])
+
+    blocklist_summary = []
+    for ip, entry in sorted(blocklist.items()):
+        matching_items = [item for item in records if item["blocklist"]["blocklist_ip"] == ip]
+        alerts_in_group = [item["alert"] for item in matching_items]
+        blocklist_summary.append([
+            ip,
+            entry.get("mode", ""),
+            entry.get("blocked_at", ""),
+            entry.get("reason", ""),
+            len(matching_items),
+            _max_severity(alerts_in_group) if alerts_in_group else "N/A",
+            max((item["risk"] for item in matching_items), default=0),
+            _mode(item["family"] for item in matching_items) if matching_items else "N/A",
         ])
 
     repeated_endpoints = []
@@ -387,6 +461,8 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             getattr(alert, "local_ip", None) or "",
             getattr(alert, "remote_ip", None) or "",
             alert.dst_port or "N/A",
+            "Yes" if item["blocklist"]["is_blocklisted"] else "No",
+            item["blocklist"]["blocklist_mode"],
             item["action_code"],
         ])
 
@@ -398,6 +474,7 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         "top_sources": top_sources,
         "top_targets": top_targets,
         "top_remote_endpoints": top_remote_endpoints,
+        "blocklist_summary": blocklist_summary,
         "repeated_endpoints": repeated_endpoints,
         "priority_incidents": priority_incidents,
         "action_legend": [[code, description] for code, description in ACTION_LEGEND.items()],
@@ -472,20 +549,23 @@ async def export_alerts_csv(
         "include_false_positive": include_false_positive,
         "zero_day_only": zero_day_only,
     }
-    summaries = _build_alert_summaries(alerts, filters, exported_at)
+    blocklist = _load_blocklist(db)
+    summaries = _build_alert_summaries(alerts, filters, exported_at, blocklist)
 
     output = StringIO()
     writer = csv.writer(output, lineterminator="\n")
     _write_csv_section(writer, "Report Overview", ["metric", "value"], summaries["report_overview"])
+    if summaries["blocklist_summary"]:
+        _write_csv_section(writer, "Blocklist Summary", ["ip", "mode", "blocklisted_at", "reason", "matching_alert_count", "max_severity", "max_risk_score", "top_attack_family"], summaries["blocklist_summary"])
     if alerts:
         _write_csv_section(writer, "Severity Summary", ["severity", "count", "percentage"], summaries["severity_summary"])
         _write_csv_section(writer, "Attack Family Summary", ["attack_family", "count", "percentage"], summaries["family_summary"])
         _write_csv_section(writer, "Direction Summary", ["traffic_direction", "count", "percentage"], summaries["direction_summary"])
         _write_csv_section(writer, "Top Sources", ["src_ip", "alert_count", "unique_targets", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_sources"])
         _write_csv_section(writer, "Top Targets", ["dst_ip", "alert_count", "unique_sources", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_targets"])
-        _write_csv_section(writer, "Top Remote Endpoints", ["remote_ip", "alert_count", "unique_local_endpoints", "top_attack_family", "max_severity", "max_risk_score", "top_direction"], summaries["top_remote_endpoints"])
+        _write_csv_section(writer, "Top Remote Endpoints", ["remote_ip", "alert_count", "unique_local_endpoints", "top_attack_family", "max_severity", "max_risk_score", "top_direction", "is_blocklisted", "blocklist_mode", "blocklisted_at"], summaries["top_remote_endpoints"])
         _write_csv_section(writer, "Repeated Endpoint Pairs", ["src_ip", "dst_ip", "dst_port", "protocol", "count", "first_seen", "last_seen", "max_severity", "max_risk_score"], summaries["repeated_endpoints"])
-        _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "traffic_direction", "local_ip", "remote_ip", "dst_port", "action_code"], summaries["priority_incidents"])
+        _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "traffic_direction", "local_ip", "remote_ip", "dst_port", "is_blocklisted", "blocklist_mode", "action_code"], summaries["priority_incidents"])
         _write_csv_section(writer, "Action Legend", ["action_code", "explanation"], summaries["action_legend"])
 
     filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -522,10 +602,12 @@ async def export_raw_alerts_csv(
 
     output = StringIO()
     writer = csv.writer(output, lineterminator="\n")
+    blocklist = _load_blocklist(db)
     
     writer.writerow(RAW_ALERT_EXPORT_FIELDS)
     
     for alert in alerts:
+        block_info = _blocklist_info(alert, blocklist)
         row = [
             alert.id,
             alert.alert_id,
@@ -541,6 +623,13 @@ async def export_raw_alerts_csv(
             "Yes" if alert.is_false_positive else "No",
             "Yes" if alert.is_zero_day else "No",
             getattr(alert, "traffic_direction", "") or "",
+            getattr(alert, "local_ip", "") or "",
+            getattr(alert, "remote_ip", "") or "",
+            getattr(alert, "containment_target_ip", "") or "",
+            "Yes" if block_info["is_blocklisted"] else "No",
+            block_info["blocklist_mode"],
+            block_info["blocklisted_at"],
+            block_info["blocklist_reason"],
         ]
         writer.writerow([_csv_safe(cell) for cell in row])
 
