@@ -1,8 +1,18 @@
 {
-  "run_id": "d35cb78b-63f2-42c8-8921-07529c4efb76",
+  "run_id": "c04121a9-fbe2-4925-8d50-1c36e0580e0d",
   "dataset_type": "nsl_kdd",
   "dataset_display": "NSL-KDD Benchmark",
   "batch_only": true,
+  "representation": {
+    "name": "pca",
+    "display_name": "PCA",
+    "component_count": 0,
+    "scaler": "RobustScaler",
+    "fitted": true
+  },
+  "representation_name": "pca",
+  "representation_display": "PCA",
+  "representation_components": 10,
   "nsa_summary": {
     "status": "fitted",
     "algorithm": "V-Detector Negative Selection Algorithm (NSA)",
@@ -61,13 +71,20 @@
       "active": false,
       "reason": "Weighted fusion is disabled; active NSA decision uses v_detector_match OR self_distance > threshold."
     },
-    "trained_at": "2026-05-30T09:58:45.388027+00:00",
+    "trained_at": "2026-05-31T13:09:46.789552+00:00",
     "fusion_weights": {},
     "fusion_component_scales": {},
     "active_antibodies": 40,
     "dataset_type": "nsl_kdd",
     "dataset_name": "NSL-KDD Benchmark",
-    "max_attempts": 1200
+    "max_attempts": 1200,
+    "representation": {
+      "name": "pca",
+      "display_name": "PCA",
+      "component_count": 0,
+      "scaler": "RobustScaler",
+      "fitted": true
+    }
   },
   "iso_summary": {
     "status": "fitted",
@@ -102,10 +119,17 @@
       "score_max": 0.00362
     },
     "score_threshold": -0.028201608862022942,
-    "trained_at": "2026-05-30T09:58:45.505010",
+    "trained_at": "2026-05-31T13:09:46.986581",
     "score_scale": 0.0028025581897349436,
     "dataset_type": "nsl_kdd",
-    "dataset_name": "NSL-KDD Benchmark"
+    "dataset_name": "NSL-KDD Benchmark",
+    "representation": {
+      "name": "pca",
+      "display_name": "PCA",
+      "component_count": 0,
+      "scaler": "RobustScaler",
+      "fitted": true
+    }
   },
   "sb_summary": {
     "status": "fitted",
@@ -200,6 +224,37 @@
       "score_max": 0.11175
     }
   },
+  "representation_self_boundary_summary": {
+    "status": "fitted",
+    "algorithm": "Quantile Fence Self-Boundary (AIS Innate Immune)",
+    "boundary_mode": "quantile_fence",
+    "lower_quantile": 0.005,
+    "upper_quantile": 0.995,
+    "z_threshold": 2.0,
+    "min_violations_ratio": 0.15,
+    "score_mode": "weighted_feature_violation",
+    "n_features_modelled": 10,
+    "n_constant_features": 0,
+    "n_training_samples": 60,
+    "weighted_threshold": 0.0,
+    "weighted_calibration": {
+      "mode": "unsupervised_benign_weighted_self_boundary",
+      "target_fpr": 0.1,
+      "observed_fpr": 0.066667,
+      "normal_pass_rate": 0.933333,
+      "threshold": 0.0,
+      "n_calibration_samples": 30,
+      "rank_index": 28,
+      "rank_index_zero_based": 27,
+      "calibration_reliability": "experimental",
+      "decision_rule": "score > threshold",
+      "score_min": 0.0,
+      "score_median": 0.0,
+      "score_p95": 0.060102,
+      "score_p99": 0.111033,
+      "score_max": 0.11175
+    }
+  },
   "nsa_eval": {
     "model_name": "AIS (NSA)",
     "accuracy": 0.9333,
@@ -224,7 +279,7 @@
     "n_samples": 30,
     "n_attacks": 0,
     "n_normal": 30,
-    "evaluated_at": "2026-05-30T09:58:45.525163",
+    "evaluated_at": "2026-05-31T13:09:47.048910",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -274,7 +329,7 @@
       "precision": "Precision: percentage of alerts that are true attacks.",
       "f1": "F1-score: harmonic mean of precision and recall.",
       "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
       "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
     },
     "labelled_attack_metrics_applicable": false,
@@ -296,13 +351,13 @@
     "silhouette": {
       "value": 0.1182,
       "applicable": true,
-      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "reason": "Computed from saved representation-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 30,
       "groups": {
         "0": 28,
         "1": 2
       },
-      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
+      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness."
     }
   },
   "nsa_only_eval": {
@@ -329,7 +384,7 @@
     "n_samples": 30,
     "n_attacks": 0,
     "n_normal": 30,
-    "evaluated_at": "2026-05-30T09:58:45.525163",
+    "evaluated_at": "2026-05-31T13:09:47.048910",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -379,7 +434,7 @@
       "precision": "Precision: percentage of alerts that are true attacks.",
       "f1": "F1-score: harmonic mean of precision and recall.",
       "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
       "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
     }
   },
@@ -407,7 +462,7 @@
     "n_samples": 30,
     "n_attacks": 0,
     "n_normal": 30,
-    "evaluated_at": "2026-05-30T09:58:45.528660",
+    "evaluated_at": "2026-05-31T13:09:47.058148",
     "metric_assessment": {
       "recall": {
         "grade": "not_applicable",
@@ -457,7 +512,7 @@
       "precision": "Precision: percentage of alerts that are true attacks.",
       "f1": "F1-score: harmonic mean of precision and recall.",
       "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
       "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
     },
     "labelled_attack_metrics_applicable": false,
@@ -466,13 +521,13 @@
     "silhouette": {
       "value": 0.133,
       "applicable": true,
-      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "reason": "Computed from saved representation-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 30,
       "groups": {
         "0": 28,
         "1": 2
       },
-      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
+      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness."
     }
   },
   "comparison": {
@@ -551,6 +606,13 @@
     "attack_rows_available": 40
   },
   "model_configs": {
+    "representation": {
+      "name": "pca",
+      "display_name": "PCA",
+      "component_count": 0,
+      "scaler": "RobustScaler",
+      "fitted": true
+    },
     "nsa": {
       "max_detectors": 40,
       "max_attempts": 1200,
@@ -677,6 +739,23 @@
     "score_p99": 0.111033,
     "score_max": 0.11175
   },
+  "representation_self_boundary_calibration_summary": {
+    "mode": "unsupervised_benign_weighted_self_boundary",
+    "target_fpr": 0.1,
+    "observed_fpr": 0.066667,
+    "normal_pass_rate": 0.933333,
+    "threshold": 0.0,
+    "n_calibration_samples": 30,
+    "rank_index": 28,
+    "rank_index_zero_based": 27,
+    "calibration_reliability": "experimental",
+    "decision_rule": "score > threshold",
+    "score_min": 0.0,
+    "score_median": 0.0,
+    "score_p95": 0.060102,
+    "score_p99": 0.111033,
+    "score_max": 0.11175
+  },
   "raw_self_boundary_calibration_summary": {
     "mode": "unsupervised_benign_weighted_self_boundary",
     "target_fpr": 0.1,
@@ -723,7 +802,7 @@
     "n_samples": 70,
     "n_attacks": 40,
     "n_normal": 30,
-    "evaluated_at": "2026-05-30T09:58:45.569950",
+    "evaluated_at": "2026-05-31T13:09:47.138854",
     "metric_assessment": {
       "recall": {
         "grade": "target_met",
@@ -797,7 +876,7 @@
       "precision": "Precision: percentage of alerts that are true attacks.",
       "f1": "F1-score: harmonic mean of precision and recall.",
       "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
       "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
     },
     "available": true,
@@ -1493,7 +1572,7 @@
         "D": "mature V-detector match",
         "G": "self-gap fallback",
         "F": "legacy fused-score threshold (disabled for pure NSA)",
-        "P": "PCA-space self-boundary evidence",
+        "P": "representation-space self-boundary evidence",
         "R": "raw-feature self-boundary evidence"
       }
     },
@@ -1576,7 +1655,7 @@
         "D": "mature V-detector match",
         "G": "self-gap fallback",
         "F": "legacy fused-score threshold (disabled for pure NSA)",
-        "P": "PCA-space self-boundary evidence",
+        "P": "representation-space self-boundary evidence",
         "R": "raw-feature self-boundary evidence"
       }
     },
@@ -1611,7 +1690,7 @@
     "n_samples": 70,
     "n_attacks": 40,
     "n_normal": 30,
-    "evaluated_at": "2026-05-30T09:58:45.718964",
+    "evaluated_at": "2026-05-31T13:09:47.498335",
     "metric_assessment": {
       "recall": {
         "grade": "target_met",
@@ -1685,7 +1764,7 @@
       "precision": "Precision: percentage of alerts that are true attacks.",
       "f1": "F1-score: harmonic mean of precision and recall.",
       "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+      "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
       "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
     },
     "available": true,
@@ -2256,13 +2335,13 @@
     "silhouette": {
       "value": 0.1182,
       "applicable": true,
-      "reason": "Computed from PCA-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
+      "reason": "Computed from saved representation-space features and predicted normal/anomaly groups; interpret as separation only, not labelled correctness.",
       "n_samples": 30,
       "groups": {
         "0": 28,
         "1": 2
       },
-      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
+      "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness."
     },
     "silhouette_score": 0.1182,
     "source_decomposition": {
@@ -2344,7 +2423,7 @@
         "D": "mature V-detector match",
         "G": "self-gap fallback",
         "F": "legacy fused-score threshold (disabled for pure NSA)",
-        "P": "PCA-space self-boundary evidence",
+        "P": "representation-space self-boundary evidence",
         "R": "raw-feature self-boundary evidence"
       }
     },
@@ -2360,7 +2439,7 @@
       ],
       "value": 0.1182
     },
-    "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness."
+    "explanation": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness."
   },
   "source_decomposition": {
     "available": true,
@@ -2441,7 +2520,7 @@
       "D": "mature V-detector match",
       "G": "self-gap fallback",
       "F": "legacy fused-score threshold (disabled for pure NSA)",
-      "P": "PCA-space self-boundary evidence",
+      "P": "representation-space self-boundary evidence",
       "R": "raw-feature self-boundary evidence"
     }
   },
@@ -2456,25 +2535,35 @@
     "precision": "Precision: percentage of alerts that are true attacks.",
     "f1": "F1-score: harmonic mean of precision and recall.",
     "accuracy": "Accuracy: overall correctness, reported as secondary because IDS datasets are imbalanced.",
-    "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in PCA space. It does not prove attack-detection correctness.",
+    "silhouette_score": "Silhouette Score: unsupervised separation of predicted normal/anomaly groups in the saved representation space. It does not prove attack-detection correctness.",
     "self_intrusion_rate": "Self Intrusion Rate: benign validation samples incorrectly flagged by NSA. AIS autoimmunity check; lower is better."
   },
   "detection_architecture": "pure_nsa_v_detector_self_gap",
-  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit PCA/scaler, train detectors, train self-boundary, or tune thresholds. The final AIS decision is a pure NSA rule: mature V-detector match OR calibrated self-gap. Self-boundary models are retained only for alert evidence.",
-  "duration_seconds": 0.66,
-  "trained_at": "2026-05-30T17:58:45.198613",
+  "unsupervised_note": "Labels are used only to select BENIGN self rows and for reporting. No attack labels are used to fit the scaler, representation layer, train detectors, train self-boundary, or tune thresholds. The final AIS decision is a pure NSA rule: mature V-detector match OR calibrated self-gap. Self-boundary models are retained only for alert evidence.",
+  "duration_seconds": 1.48,
+  "trained_at": "2026-05-31T21:09:46.356774",
   "comparison_record": {
-    "run_id": "d35cb78b-63f2-42c8-8921-07529c4efb76",
-    "trained_at": "2026-05-30T17:58:45.198613",
+    "run_id": "c04121a9-fbe2-4925-8d50-1c36e0580e0d",
+    "trained_at": "2026-05-31T21:09:46.356774",
     "dataset_type": "nsl_kdd",
     "dataset_display": "NSL-KDD Benchmark",
-    "duration_seconds": 0.66,
+    "duration_seconds": 1.48,
     "target_fpr": 0.1,
     "benign_rows_available": 120,
     "benign_rows_used": 120,
     "benign_row_limit": 20000,
     "feature_count": 41,
     "pca_components": 10,
+    "representation": {
+      "name": "pca",
+      "display_name": "PCA",
+      "component_count": 10,
+      "dae_latent_dim": null,
+      "dae_noise_std": null,
+      "experimental": false
+    },
+    "representation_name": "pca",
+    "representation_components": 10,
     "split_sizes": {
       "benign_train": 60,
       "benign_calibration": 30,
@@ -2482,6 +2571,13 @@
       "attack_rows_available": 40
     },
     "model_configs": {
+      "representation": {
+        "name": "pca",
+        "display_name": "PCA",
+        "component_count": 0,
+        "scaler": "RobustScaler",
+        "fitted": true
+      },
       "nsa": {
         "max_detectors": 40,
         "max_attempts": 1200,

@@ -63,15 +63,12 @@
 }
 
 .settings-access-note {
-  background: var(--warning-subtle);
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius);
-  color: var(--warning);
+  color: var(--danger);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 33px;
+  font-weight: 600;
   line-height: 1.45;
   margin-bottom: 16px;
-  padding: 9px 12px;
 }
 
 .settings-grid {
@@ -115,6 +112,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  font-family: var(--font-mono);
   width: 100%;
   min-height: 78px;
   padding: 10px 12px;
@@ -132,6 +130,7 @@
 
 .settings-model small {
   color: var(--text-tertiary);
+  font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.35;
 }

@@ -94,47 +94,8 @@ async def detect(
                 filename=upload_filename,
             )
 
-            _state["alerts"].extend(result["alerts"])
-            _state["packet_count"]  += result["total_checked"]
-            _state["anomaly_count"] += result["anomalies_found"]
             _state["last_detect_result"] = result
             _state["detect_status"] = "done"
-
-            if result["alerts"]:
-                from app.core.database import SessionLocal
-                from app.models.db_models import AlertDB
-                db = SessionLocal()
-                try:
-                    db_alerts = []
-                    for a in result["alerts"]:
-                        # Safely convert dst_port to int, defaulting to 0 if 'N/A' or invalid
-                        try:
-                            dst_port = int(a.get("dst_port", 0) or 0)
-                        except (ValueError, TypeError):
-                            dst_port = 0
-
-                        db_alerts.append(AlertDB(
-                            alert_id=a["alert_id"],
-                            timestamp=a["timestamp"],
-                            attack_type=a["attack_type"],
-                            src_ip=a.get("src_ip", "N/A"),
-                            dst_ip=a.get("dst_ip", "N/A"),
-                            dst_port=dst_port,
-                            protocol=a.get("protocol", "N/A"),
-                            severity=a["severity"],
-                            confidence=a["confidence"],
-                            confidence_pct=a["confidence_pct"],
-                            is_false_positive=False,
-                            is_zero_day=a["is_zero_day"],
-                            raw_features=a.get("raw_features", {})
-                        ))
-                    db.add_all(db_alerts)
-                    db.commit()
-                except Exception as e:
-                    dlog(f"[ERROR] DB Save failed: {e}")
-                    db.rollback()
-                finally:
-                    db.close()
 
             dlog(f"[OK] Checked {result['total_checked']:,} flows.")
             dlog(
@@ -148,6 +109,7 @@ async def detect(
                 f"Medium: {sev.get('medium',0)}  "
                 f"Low: {sev.get('low',0)}"
             )
+            dlog("[INFO] Batch result kept for viewing only; alerts were not saved to the database.")
             dlog("[COMPLETE] Detection finished.")
 
         except Exception as e:

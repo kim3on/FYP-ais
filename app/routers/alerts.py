@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -39,6 +40,19 @@ ACTION_LEGEND = {
     "REVIEW_WEB": "Review web access logs and inspect the affected application endpoint.",
     "MONITOR": "Monitor and correlate with host, firewall, and application logs.",
 }
+ENDPOINT_ROLE_FIELDS = [
+    "traffic_direction",
+    "flow_initiator_ip",
+    "flow_responder_ip",
+    "local_ip",
+    "remote_ip",
+    "suspected_attacker_ip",
+    "suspected_victim_ip",
+    "suspected_compromised_host",
+    "containment_target_ip",
+    "endpoint_role_confidence",
+    "endpoint_role_reason",
+]
 
 
 def _require_export_role(user):
@@ -245,14 +259,26 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         [family, count, _percentage(count, total)]
         for family, count in sorted(family_counts.items(), key=lambda item: (-item[1], item[0]))
     ]
+    direction_counts = Counter(
+        (getattr(item["alert"], "traffic_direction", None) or "unknown").lower()
+        for item in records
+    )
+    direction_summary = [
+        [direction, count, _percentage(count, total)]
+        for direction, count in sorted(direction_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
     by_src = defaultdict(list)
     by_dst = defaultdict(list)
+    by_remote = defaultdict(list)
     by_endpoint = defaultdict(list)
     for item in records:
         alert = item["alert"]
         by_src[alert.src_ip or "N/A"].append(item)
         by_dst[alert.dst_ip or "N/A"].append(item)
+        remote_ip = getattr(alert, "remote_ip", None) or ""
+        if remote_ip and remote_ip.upper() != "N/A":
+            by_remote[remote_ip].append(item)
         by_endpoint[item["endpoint"]].append(item)
 
     def group_sort_key(items):
@@ -280,6 +306,19 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             _mode(item["family"] for item in items),
             _max_severity(alerts_in_group),
             max(item["risk"] for item in items),
+        ])
+
+    top_remote_endpoints = []
+    for remote_ip, items in sorted(by_remote.items(), key=lambda pair: group_sort_key(pair[1]))[:10]:
+        alerts_in_group = [item["alert"] for item in items]
+        top_remote_endpoints.append([
+            remote_ip,
+            len(items),
+            len({getattr(alert, "local_ip", None) or "N/A" for alert in alerts_in_group}),
+            _mode(item["family"] for item in items),
+            _max_severity(alerts_in_group),
+            max(item["risk"] for item in items),
+            _mode(getattr(alert, "traffic_direction", None) for alert in alerts_in_group),
         ])
 
     repeated_endpoints = []
@@ -327,6 +366,9 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             item["risk"],
             alert.src_ip or "N/A",
             alert.dst_ip or "N/A",
+            getattr(alert, "traffic_direction", None) or "",
+            getattr(alert, "local_ip", None) or "",
+            getattr(alert, "remote_ip", None) or "",
             alert.dst_port or "N/A",
             item["action_code"],
         ])
@@ -335,8 +377,10 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         "report_overview": report_overview,
         "severity_summary": severity_summary,
         "family_summary": family_summary,
+        "direction_summary": direction_summary,
         "top_sources": top_sources,
         "top_targets": top_targets,
+        "top_remote_endpoints": top_remote_endpoints,
         "repeated_endpoints": repeated_endpoints,
         "priority_incidents": priority_incidents,
         "action_legend": [[code, description] for code, description in ACTION_LEGEND.items()],
@@ -356,12 +400,26 @@ async def list_alerts(
         query = query.filter(AlertDB.severity == severity)
     
     total = query.count()
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for sev, count in (
+        query
+        .with_entities(func.lower(AlertDB.severity), func.count(AlertDB.id))
+        .group_by(func.lower(AlertDB.severity))
+        .all()
+    ):
+        key = (sev or "low").lower()
+        if key in severity_counts:
+            severity_counts[key] = int(count or 0)
+    zero_day_count = query.filter(AlertDB.is_zero_day == True).count()  # noqa: E712
     alerts = query.order_by(AlertDB.id.desc()).offset(offset).limit(limit).all()
     
     return {
         "total":   total,
         "limit":   limit,
         "offset":  offset,
+        "returned": len(alerts),
+        "severity_counts": severity_counts,
+        "zero_day_count": zero_day_count,
         "alerts":  alerts,
     }
 
@@ -405,10 +463,12 @@ async def export_alerts_csv(
     if alerts:
         _write_csv_section(writer, "Severity Summary", ["severity", "count", "percentage"], summaries["severity_summary"])
         _write_csv_section(writer, "Attack Family Summary", ["attack_family", "count", "percentage"], summaries["family_summary"])
+        _write_csv_section(writer, "Direction Summary", ["traffic_direction", "count", "percentage"], summaries["direction_summary"])
         _write_csv_section(writer, "Top Sources", ["src_ip", "alert_count", "unique_targets", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_sources"])
         _write_csv_section(writer, "Top Targets", ["dst_ip", "alert_count", "unique_sources", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_targets"])
+        _write_csv_section(writer, "Top Remote Endpoints", ["remote_ip", "alert_count", "unique_local_endpoints", "top_attack_family", "max_severity", "max_risk_score", "top_direction"], summaries["top_remote_endpoints"])
         _write_csv_section(writer, "Repeated Endpoint Pairs", ["src_ip", "dst_ip", "dst_port", "protocol", "count", "first_seen", "last_seen", "max_severity", "max_risk_score"], summaries["repeated_endpoints"])
-        _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "dst_port", "action_code"], summaries["priority_incidents"])
+        _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "traffic_direction", "local_ip", "remote_ip", "dst_port", "action_code"], summaries["priority_incidents"])
         _write_csv_section(writer, "Action Legend", ["action_code", "explanation"], summaries["action_legend"])
 
     filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -450,7 +510,7 @@ async def export_raw_alerts_csv(
     headers = [
         "id", "alert_id", "timestamp", "attack_type", "src_ip", "dst_ip", 
         "dst_port", "protocol", "severity", "confidence", "confidence_pct", 
-        "is_false_positive", "is_zero_day"
+        "is_false_positive", "is_zero_day", *ENDPOINT_ROLE_FIELDS
     ]
     writer.writerow(headers)
     
@@ -469,6 +529,7 @@ async def export_raw_alerts_csv(
             alert.confidence_pct,
             "Yes" if alert.is_false_positive else "No",
             "Yes" if alert.is_zero_day else "No",
+            *[getattr(alert, field, "") for field in ENDPOINT_ROLE_FIELDS],
         ]
         writer.writerow([_csv_safe(cell) for cell in row])
 

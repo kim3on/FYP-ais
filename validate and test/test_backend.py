@@ -853,7 +853,10 @@ test("Training API — NSL-KDD rejects DAE representation",         test_trainin
 print("\n── 6. Detection Engine ─────────────────────────────────────────")
 # ════════════════════════════════════════════════════════════
 from app.core.detection import DetectionEngine
+from app.core.endpoint_roles import infer_endpoint_roles
 from app.core.pipeline import load_nsa, load_preprocessor, load_self_boundary, load_pca_self_boundary
+from app.models.db_models import AlertDB
+from app.routers.alerts import ENDPOINT_ROLE_FIELDS as ALERT_EXPORT_ROLE_FIELDS
 
 def test_detection_result_structure():
     """Detection should return correct keys and alert structure."""
@@ -922,7 +925,12 @@ def test_detection_alert_fields():
 
     required = {'alert_id', 'timestamp', 'src_ip', 'dst_ip', 'dst_port',
                 'protocol', 'attack_type', 'severity', 'confidence',
-                'confidence_pct', 'is_false_positive', 'anomaly_sources'}
+                'confidence_pct', 'is_false_positive', 'anomaly_sources',
+                'traffic_direction', 'flow_initiator_ip', 'flow_responder_ip',
+                'local_ip', 'remote_ip', 'suspected_attacker_ip',
+                'suspected_victim_ip', 'suspected_compromised_host',
+                'containment_target_ip', 'endpoint_role_confidence',
+                'endpoint_role_reason'}
     valid_sev = {'critical', 'high', 'medium', 'low'}
     valid_sources = {
         'v_detector', 'self_gap', 'isolation_forest',
@@ -974,10 +982,60 @@ def test_detection_nsl_kdd_batch_result():
         assert alert["src_ip"] == "N/A"
         assert alert["attack_type"] in {"Unknown Anomaly", "Zero-Day Candidate"}
 
+def test_endpoint_role_inference():
+    inbound = infer_endpoint_roles("8.8.8.8", "192.168.1.10", "Port Scan - SYN Stealth")
+    assert inbound.traffic_direction == "inbound"
+    assert inbound.local_ip == "192.168.1.10"
+    assert inbound.remote_ip == "8.8.8.8"
+    assert inbound.suspected_attacker_ip == ""
+    assert inbound.suspected_victim_ip == ""
+    assert inbound.containment_target_ip == ""
+
+    outbound = infer_endpoint_roles("192.168.1.10", "45.10.10.10", "Botnet - C&C Beacon")
+    assert outbound.traffic_direction == "outbound"
+    assert outbound.local_ip == "192.168.1.10"
+    assert outbound.remote_ip == "45.10.10.10"
+    assert outbound.suspected_compromised_host == ""
+    assert outbound.containment_target_ip == ""
+
+    internal = infer_endpoint_roles("192.168.1.10", "192.168.1.20", "Unknown Anomaly")
+    assert internal.traffic_direction == "unknown"
+    assert internal.containment_target_ip == ""
+
+    external = infer_endpoint_roles("8.8.8.8", "1.1.1.1", "Unknown Anomaly")
+    assert external.traffic_direction == "unknown"
+    assert external.containment_target_ip == ""
+
+    unknown = infer_endpoint_roles("?", "192.168.1.10", "Unknown Anomaly")
+    assert unknown.traffic_direction == "unknown"
+    assert unknown.containment_target_ip == ""
+
+def test_alert_db_endpoint_role_columns():
+    columns = set(AlertDB.__table__.columns.keys())
+    required = {
+        "traffic_direction", "flow_initiator_ip", "flow_responder_ip",
+        "local_ip", "remote_ip", "suspected_attacker_ip", "suspected_victim_ip",
+        "suspected_compromised_host", "containment_target_ip",
+        "endpoint_role_confidence", "endpoint_role_reason",
+    }
+    assert required.issubset(columns), f"Missing AlertDB endpoint role columns: {required - columns}"
+
+def test_alert_export_endpoint_role_fields():
+    required = {
+        "traffic_direction", "flow_initiator_ip", "flow_responder_ip",
+        "local_ip", "remote_ip", "suspected_attacker_ip", "suspected_victim_ip",
+        "suspected_compromised_host", "containment_target_ip",
+        "endpoint_role_confidence", "endpoint_role_reason",
+    }
+    assert required.issubset(set(ALERT_EXPORT_ROLE_FIELDS))
+
 test("Detection — result structure has all required keys",          test_detection_result_structure)
 test("Detection — every alert has required fields & valid severity", test_detection_alert_fields)
 test("Detection — Isolation Forest model also works",               test_detection_with_iso_model)
 test("Detection — NSL-KDD batch verification works",                test_detection_nsl_kdd_batch_result)
+test("Endpoint roles — inbound/outbound direction inference",       test_endpoint_role_inference)
+test("Endpoint roles — AlertDB persists nullable role columns",      test_alert_db_endpoint_role_columns)
+test("Endpoint roles — CSV export includes role fields",            test_alert_export_endpoint_role_fields)
 
 
 # ════════════════════════════════════════════════════════════

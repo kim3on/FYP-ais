@@ -189,7 +189,7 @@ export default function Settings() {
       </div>
       {!canOperate && (
         <div className="settings-access-note">
-          Settings are read-only for this account. Administrator access is required to save changes or clear stored flow data.
+          Administrator access is required!
         </div>
       )}
       {(error || saved) && (

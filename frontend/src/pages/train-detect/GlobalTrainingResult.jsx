@@ -116,7 +116,7 @@ function ComparisonPanel({ record }) {
 //  GLOBAL TRAINING RESULT
 // ══════════════════════════════════════════════════════════════
 export default function GlobalTrainingResult() {
-  const { trainResult, trainFile, activeModel } = useApp();
+  const { trainResult, trainFile, activeModel, devMode } = useApp();
   if (!trainResult) return null;
 
   const selectedModel = activeModel === 'isolation_forest' ? 'isolation_forest' : 'nsa';
@@ -166,8 +166,10 @@ export default function GlobalTrainingResult() {
       };
 
   const detailMetrics = [
-    ['Representation', representationName, 'var(--accent)'],
-    ['Representation Components', countValue(representationComponents), 'var(--accent)'],
+    ...(devMode ? [
+      ['Representation', representationName, 'var(--accent)'],
+      ['Representation Components', countValue(representationComponents), 'var(--accent)'],
+    ] : []),
     ['Target FPR', percentValue(targetFpr, 2), 'var(--accent)'],
     ['Observed Benign FPR', percentValue(observedFpr, 2), 'var(--warning)'],
     ['Normal Pass Rate', percentValue(normalPassRate, 2), 'var(--success)'],

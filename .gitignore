@@ -22,10 +22,7 @@ app/static_react/         # React production build output (regenerate with npm r
 
 
 # ── Trained model artefacts (large binary files — regenerate with training) ─
-app/artefacts/nsa_model.pkl
-app/artefacts/iso_model.pkl
-app/artefacts/preprocessor.pkl
-app/artefacts/nsl_kdd/
+app/artefacts/
 # Keep last_train_result.json so the dashboard shows results on clone
 # app/artefacts/last_train_result.json
 
@@ -53,6 +50,7 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+AGENTS.md
 *.swp
 *.swo
 

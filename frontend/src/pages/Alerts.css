@@ -1,0 +1,3 @@
+.alerts-stat-grid .stat-card::after {
+  display: none;
+}

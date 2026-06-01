@@ -12,6 +12,7 @@ import {
 import { useApp } from '../hooks/useApp';
 import AlertTable from '../components/AlertTable';
 import '../components/Layout/Layout.css';
+import './Alerts.css';
 
 export default function Alerts() {
   const { alerts, setAlerts } = useApp();
@@ -20,13 +21,28 @@ export default function Alerts() {
   const [tab, setTab]         = useState('alerts'); // 'alerts' | 'blocked'
   const [blockedIPs, setBlockedIPs] = useState([]);
   const [blockError, setBlockError] = useState('');
+  const [alertStats, setAlertStats] = useState({
+    total: 0,
+    returned: 0,
+    severity_counts: {},
+    zero_day_count: 0,
+  });
 
   // ── Fetch alerts ─────────────────────────────────────────────
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getAlerts(500);
-      setAlerts(data.alerts || data || []);
+      const loadedAlerts = data.alerts || data || [];
+      setAlerts(loadedAlerts);
+      setAlertStats({
+        total: Number(data.total ?? loadedAlerts.length),
+        returned: Number(data.returned ?? loadedAlerts.length),
+        severity_counts: data.severity_counts || {},
+        zero_day_count: Number(
+          data.zero_day_count ?? loadedAlerts.filter(a => a.is_zero_day || a.attack_type === 'Zero-Day Candidate').length
+        ),
+      });
     } catch(err) {
       console.error("Failed to fetch alerts:", err);
     } finally {
@@ -94,10 +110,11 @@ export default function Alerts() {
   });
 
   const counts = {
-    total:   alerts.length,
-    critical: alerts.filter(a=>(a.severity||'').toLowerCase()==='critical').length,
-    high:    alerts.filter(a=>(a.severity||'').toLowerCase()==='high').length,
-    zeroDay: alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length,
+    total:   alertStats.total ?? alerts.length,
+    loaded:  alertStats.returned ?? alerts.length,
+    critical: alertStats.severity_counts?.critical ?? alerts.filter(a=>(a.severity||'').toLowerCase()==='critical').length,
+    high:    alertStats.severity_counts?.high ?? alerts.filter(a=>(a.severity||'').toLowerCase()==='high').length,
+    zeroDay: alertStats.zero_day_count ?? alerts.filter(a=>a.is_zero_day||a.attack_type==='Zero-Day Candidate').length,
   };
 
   async function handleClearAlerts() {
@@ -105,6 +122,7 @@ export default function Alerts() {
     try {
       await clearAlerts();
       setAlerts([]);
+      setAlertStats({ total: 0, returned: 0, severity_counts: {}, zero_day_count: 0 });
     } catch(err) {
       console.error("Failed to clear alerts:", err);
       alert(err.message || 'Failed to clear alerts');
@@ -168,19 +186,27 @@ export default function Alerts() {
       </div>
 
       {/* Stat row */}
-      <div className="stat-grid" style={{marginBottom:'16px'}}>
-        <div className="stat-card"><div className="stat-label">Total</div><div className="stat-value">{counts.total}</div></div>
+      <div className="stat-grid alerts-stat-grid" style={{marginBottom:'16px'}}>
+        <div className="stat-card">
+          <div className="stat-label">Total Stored</div>
+          <div className="stat-value">{counts.total.toLocaleString()}</div>
+          {counts.loaded < counts.total && (
+            <div style={{fontFamily:'var(--font-mono)',fontSize:'10px',color:'var(--text-tertiary)',marginTop:'6px'}}>
+              Showing latest {counts.loaded.toLocaleString()}
+            </div>
+          )}
+        </div>
         <div className="stat-card" style={{borderColor:counts.critical>0?'var(--danger-border)':'var(--border)'}}>
           <div className="stat-label" style={{color:'var(--danger)'}}>Critical</div>
-          <div className="stat-value" style={{color:counts.critical>0?'var(--danger)':'var(--text-primary)'}}>{counts.critical}</div>
+          <div className="stat-value" style={{color:counts.critical>0?'var(--danger)':'var(--text-primary)'}}>{counts.critical.toLocaleString()}</div>
         </div>
         <div className="stat-card" style={{borderColor:counts.high>0?'var(--warning-border)':'var(--border)'}}>
           <div className="stat-label" style={{color:'var(--warning)'}}>High</div>
-          <div className="stat-value" style={{color:counts.high>0?'var(--warning)':'var(--text-primary)'}}>{counts.high}</div>
+          <div className="stat-value" style={{color:counts.high>0?'var(--warning)':'var(--text-primary)'}}>{counts.high.toLocaleString()}</div>
         </div>
         <div className="stat-card" style={{borderColor:counts.zeroDay>0?'var(--iris-border)':'var(--border)'}}>
           <div className="stat-label" style={{color:'var(--iris)'}}>Zero-Day</div>
-          <div className="stat-value" style={{color:counts.zeroDay>0?'var(--iris)':'var(--text-primary)'}}>{counts.zeroDay}</div>
+          <div className="stat-value" style={{color:counts.zeroDay>0?'var(--iris)':'var(--text-primary)'}}>{counts.zeroDay.toLocaleString()}</div>
         </div>
         <div className="stat-card" style={{borderColor:blockedIPs.length>0?'var(--danger-border)':'var(--border)'}}>
           <div className="stat-label" style={{color:'var(--danger)'}}>Blocked IPs</div>

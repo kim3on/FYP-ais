@@ -22,6 +22,7 @@ import uuid
 from app.core.datasets import DATASET_NSL_KDD, dataset_display_name, normalize_dataset_type
 from app.core.preprocessor import CICIDSPreprocessor
 from app.core.attack_attribution import attribute_attack
+from app.core.endpoint_roles import infer_endpoint_roles
 from app.core.evaluator import (
     METRIC_EXPLANATIONS,
     compute_silhouette_metric,
@@ -51,6 +52,17 @@ class AlertRecord:
     dst_ip:          str
     dst_port:        str
     protocol:        str
+    traffic_direction: str
+    flow_initiator_ip: str
+    flow_responder_ip: str
+    local_ip: str
+    remote_ip: str
+    suspected_attacker_ip: str
+    suspected_victim_ip: str
+    suspected_compromised_host: str
+    containment_target_ip: str
+    endpoint_role_confidence: str
+    endpoint_role_reason: str
     # Layer 1 — binary anomaly detection
     is_anomaly:      bool
     anomaly_score:   float        # [0, 1]
@@ -359,6 +371,7 @@ class DetectionEngine:
                 else self._attribute_attack(row, novelty_score=score, zero_day_threshold=self.zero_day_threshold)
             )
             is_zero_day = (attack_family == 'Zero-Day Candidate')
+            endpoint_roles = infer_endpoint_roles(src_ip, dst_ip, attack_family).to_dict()
 
             # Attribution confidence based on how many sources agree
             # and the strength of the anomaly score
@@ -391,6 +404,7 @@ class DetectionEngine:
                 dst_ip=dst_ip,
                 dst_port=dst_port,
                 protocol=protocol,
+                **endpoint_roles,
                 # Layer 1
                 is_anomaly=True,
                 anomaly_score=round(score, 4),

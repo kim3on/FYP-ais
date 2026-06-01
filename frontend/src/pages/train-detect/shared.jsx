@@ -9,7 +9,6 @@ export function MetricLabel({ label, className = 'td-detail-label' }) {
     <div
       className={`${className} td-metric-help`}
       tabIndex={0}
-      title={help}
       aria-label={`${label}: ${help}`}
       data-help={help}
     >

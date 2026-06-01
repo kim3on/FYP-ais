@@ -26,7 +26,7 @@ export default function TrainDetect() {
       <GlobalTrainingResult />
       {!canOperate && (
         <div className="td-access-note">
-          Admin-only controls are disabled. Previous training and detection results remain visible.
+          Administrator access is required!
         </div>
       )}
 

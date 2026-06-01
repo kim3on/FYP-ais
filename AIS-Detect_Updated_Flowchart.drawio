@@ -1,0 +1,187 @@
+<mxfile host="app.diagrams.net" agent="Codex">
+  <diagram name="AIS-Detect Updated Flowchart" id="ais-detect-updated-flowchart">
+    <mxGraphModel dx="1877" dy="1036" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-training" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=16;" value="System Training Flow&#xa;(Unsupervised Learning)" vertex="1">
+          <mxGeometry height="40" width="360" x="40" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="title-detection" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=16;" value="Anomaly Detection Flow&#xa;(Batch and Live AIS Operations)" vertex="1">
+          <mxGeometry height="40" width="420" x="760" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="train-start" parent="1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#b7e1a1;strokeColor=#6aa84f;fontStyle=1;" value="Start" vertex="1">
+          <mxGeometry height="70" width="70" x="185" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="train-init" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" value="User initiates&#xa;training mode" vertex="1">
+          <mxGeometry height="55" width="230" x="105" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="train-upload" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Upload CIC-IDS-2017&#xa;compatible dataset" vertex="1">
+          <mxGeometry height="60" width="230" x="105" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="train-validate" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" value="Validate dataset and&#xa;identify BENIGN records" vertex="1">
+          <mxGeometry height="60" width="230" x="105" y="375" as="geometry" />
+        </mxCell>
+        <mxCell id="train-split" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" value="Split BENIGN data into&#xa;train / calibration / test" vertex="1">
+          <mxGeometry height="60" width="230" x="105" y="465" as="geometry" />
+        </mxCell>
+        <mxCell id="train-preprocess" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Fit RobustScaler + PCA&#xa;on BENIGN training data" vertex="1">
+          <mxGeometry height="60" width="230" x="105" y="555" as="geometry" />
+        </mxCell>
+        <mxCell id="train-nsa" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Train NSA V-Detector&#xa;model" vertex="1">
+          <mxGeometry height="60" width="230" x="105" y="645" as="geometry" />
+        </mxCell>
+        <mxCell id="train-calibrate" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Calibrate threshold using&#xa;Target FPR on BENIGN&#xa;calibration data" vertex="1">
+          <mxGeometry height="70" width="230" x="105" y="735" as="geometry" />
+        </mxCell>
+        <mxCell id="train-iso" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Train Isolation Forest&#xa;baseline" vertex="1">
+          <mxGeometry height="55" width="230" x="105" y="835" as="geometry" />
+        </mxCell>
+        <mxCell id="train-save" parent="1" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Save preprocessor and&#xa;model artifacts" vertex="1">
+          <mxGeometry height="70" width="230" x="460" y="735" as="geometry" />
+        </mxCell>
+        <mxCell id="train-summary" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="Display training result&#xa;summary" vertex="1">
+          <mxGeometry height="55" width="230" x="460" y="835" as="geometry" />
+        </mxCell>
+        <mxCell id="train-end" parent="1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f8696b;strokeColor=#b85450;fontStyle=1;" value="End" vertex="1">
+          <mxGeometry height="70" width="70" x="540" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-start" parent="1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#b7e1a1;strokeColor=#6aa84f;fontStyle=1;" value="Start" vertex="1">
+          <mxGeometry height="70" width="70" x="935" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-load" parent="1" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Load saved preprocessor&#xa;and trained model artifacts" vertex="1">
+          <mxGeometry height="65" width="240" x="850" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-input" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Input uploaded flow file&#xa;or live captured traffic" vertex="1">
+          <mxGeometry height="60" width="240" x="850" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-live-decision" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="Live traffic?" vertex="1">
+          <mxGeometry height="90" width="150" x="895" y="385" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-flowextract" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Extract completed&#xa;flow features" vertex="1">
+          <mxGeometry height="60" width="190" x="1125" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-preprocess" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Apply saved&#xa;preprocessing pipeline" vertex="1">
+          <mxGeometry height="60" width="240" x="850" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-engine" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Run AIS detection engine&#xa;(V-detector / self-gap scoring)" vertex="1">
+          <mxGeometry height="70" width="240" x="850" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-anomaly" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="Is anomaly&#xa;detected?" vertex="1">
+          <mxGeometry height="100" width="160" x="890" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-alert" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Generate alert, severity,&#xa;attribution and update&#xa;dashboard / database" vertex="1">
+          <mxGeometry height="75" width="145" x="730" y="785" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-normal" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" value="Update normal counters&#xa;and raw flow record" vertex="1">
+          <mxGeometry height="60" width="120" x="1090" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-continue" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" value="Continue&#xa;detection?" vertex="1">
+          <mxGeometry height="90" width="150" x="895" y="835" as="geometry" />
+        </mxCell>
+        <mxCell id="detect-end" parent="1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f8696b;strokeColor=#b85450;fontStyle=1;" value="End" vertex="1">
+          <mxGeometry height="70" width="70" x="935" y="1000" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-1" edge="1" parent="1" source="train-start" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-init">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-2" edge="1" parent="1" source="train-init" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-upload">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-3" edge="1" parent="1" source="train-upload" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-validate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-4" edge="1" parent="1" source="train-validate" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-split">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-5" edge="1" parent="1" source="train-split" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-preprocess">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-6" edge="1" parent="1" source="train-preprocess" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-nsa">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-7" edge="1" parent="1" source="train-nsa" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-calibrate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-8" edge="1" parent="1" source="train-calibrate" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-iso">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-9" edge="1" parent="1" source="train-iso" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-save">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="220" y="930" />
+              <mxPoint x="400" y="930" />
+              <mxPoint x="400" y="770" />
+            </Array>
+            <mxPoint x="220" y="930" as="sourcePoint" />
+            <mxPoint x="575" y="770" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-train-10" edge="1" parent="1" source="train-save" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-summary">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-train-11" edge="1" parent="1" source="train-summary" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="train-end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-artifact-to-load" edge="1" parent="1" source="train-save" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;dashed=1;strokeColor=#666666;fontSize=11;" target="detect-load" value="Saved artifacts reused&#xa;for detection">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="575" y="240" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-detect-1" edge="1" parent="1" source="detect-start" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-load">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-2" edge="1" parent="1" source="detect-load" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-input">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-3" edge="1" parent="1" source="detect-input" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-live-decision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-live-yes" edge="1" parent="1" source="detect-live-decision" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-flowextract" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-live-no" edge="1" parent="1" source="detect-live-decision" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-preprocess" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-flow-to-pre" edge="1" parent="1" source="detect-flowextract" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-preprocess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1220" y="540" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-detect-4" edge="1" parent="1" source="detect-preprocess" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-engine">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-5" edge="1" parent="1" source="detect-engine" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-anomaly">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-anomaly-yes" edge="1" parent="1" source="detect-anomaly" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-alert" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-anomaly-no" edge="1" parent="1" source="detect-anomaly" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-normal" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-alert-cont" edge="1" parent="1" source="detect-alert" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-continue">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-normal-cont" edge="1" parent="1" source="detect-normal" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;" target="detect-continue">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-cont-no" edge="1" parent="1" source="detect-continue" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-end" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-detect-cont-yes" edge="1" parent="1" source="detect-continue" style="endArrow=block;html=1;rounded=0;strokeWidth=1.5;fontStyle=1;" target="detect-input" value="Yes">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1330" y="880" />
+              <mxPoint x="1330" y="325" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

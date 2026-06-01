@@ -6,6 +6,7 @@
 import { useState, useMemo } from 'react';
 
 const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+const hasValue = (v) => Boolean(v && v !== 'N/A' && v !== '?');
 const PAGE_SIZE = 50;
 
 export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIPs = [], showActions = false }) {
@@ -45,13 +46,14 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
           <tr>
             <th>Timestamp</th>
             <th>Detection Profile</th>
-            <th>Source Address</th>
-            <th>Target Address</th>
+            <th>Source IP</th>
+            <th>Destination IP</th>
+            <th>Direction</th>
             <th>Port</th>
             <th>Proto</th>
             <th>Severity</th>
             <th>Confidence</th>
-            {showActions && <th style={{ textAlign: 'right' }}>Forensics</th>}
+            {showActions && <th style={{ textAlign: 'right' }}>Tool</th>}
           </tr>
         </thead>
         <tbody>
@@ -59,7 +61,9 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
             const zd  = a.is_zero_day || a.attack_type === 'Zero-Day Candidate';
             const sev = (a.severity || '').toLowerCase();
             const targetIp = a.dst_ip;
-            const targetBlocked = targetIp && blockedIPs.includes(targetIp);
+            const remoteIp = hasValue(a.remote_ip) ? a.remote_ip : '';
+            const targetBlocked = remoteIp && blockedIPs.includes(remoteIp);
+            const direction = a.traffic_direction || 'unknown';
             
             // Format timestamp for better readability
             const ts = a.timestamp ? (a.timestamp.includes('T') ? a.timestamp.split('T')[1].split('.')[0] : a.timestamp) : '—';
@@ -87,19 +91,11 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                 </td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
                   {targetIp || 'N/A'}
-                  {targetBlocked && (
-                    <span style={{ 
-                      marginLeft: '8px', 
-                      fontSize: '8px', 
-                      background: 'var(--danger)', 
-                      color: '#fff', 
-                      padding: '1px 4px', 
-                      borderRadius: '2px', 
-                      verticalAlign: 'middle'
-                    }}>
-                      LOCKED
-                    </span>
-                  )}
+                </td>
+                <td style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', minWidth: '86px' }}>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+                    {direction.toUpperCase()}
+                  </span>
                 </td>
                 <td style={{ fontFamily: 'var(--font-mono)' }}>{a.dst_port || '—'}</td>
                 <td style={{ color: 'var(--text-tertiary)', fontWeight: 600 }}>
@@ -129,14 +125,27 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                       ) : (
                         <span className="badge normal" style={{ opacity: 0.7 }}>RESOLVED</span>
                       )}
-                      {targetIp && targetIp !== 'N/A' && !targetBlocked && (
+                      {remoteIp && !targetBlocked && (
                         <button
                           className="btn btn-danger"
                           style={{ fontSize: '10px', padding: '4px 8px' }}
-                          onClick={() => onBlockIP && onBlockIP(targetIp, a.attack_type)}
-                          title={`Block target ${targetIp}`}
+                          onClick={() => onBlockIP && onBlockIP(remoteIp, a.attack_type)}
+                          title={`Block remote endpoint ${remoteIp}`}
                         >
-                          Block Target
+                          BLOCK
+                        </button>
+                      )}
+                      {remoteIp && targetBlocked && (
+                        <span className="badge critical" style={{ opacity: 0.8 }}>LOCKED</span>
+                      )}
+                      {!remoteIp && (
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: '10px', padding: '4px 8px', opacity: 0.65 }}
+                          disabled
+                          title={a.endpoint_role_reason || 'No remote endpoint available'}
+                        >
+                          No remote IP
                         </button>
                       )}
                     </div>

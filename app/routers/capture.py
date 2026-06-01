@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.pipeline import engine_ready
 from app.core.datasets import DATASET_CICIDS2017
+from app.core.endpoint_roles import infer_endpoint_roles
 from app.core.capture_factory import get_packet_sniffer_class
 from app.core.cicflow_bridge import CICFlowMeterAdapter
 from app.state import _state, _build_engine
@@ -31,6 +32,34 @@ from app.routers.auth import get_current_user, require_admin_user
 
 router = APIRouter(tags=["capture"])
 logger = logging.getLogger(__name__)
+
+ENDPOINT_ROLE_FIELDS = (
+    "traffic_direction",
+    "flow_initiator_ip",
+    "flow_responder_ip",
+    "local_ip",
+    "remote_ip",
+    "suspected_attacker_ip",
+    "suspected_victim_ip",
+    "suspected_compromised_host",
+    "containment_target_ip",
+    "endpoint_role_confidence",
+    "endpoint_role_reason",
+)
+
+
+def _attach_endpoint_roles(alert: dict) -> dict:
+    roles = infer_endpoint_roles(
+        alert.get("src_ip"),
+        alert.get("dst_ip"),
+        alert.get("attack_type", ""),
+    ).to_dict()
+    alert.update(roles)
+    return alert
+
+
+def _alert_role_kwargs(alert: dict) -> dict:
+    return {field: alert.get(field) for field in ENDPOINT_ROLE_FIELDS}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -120,6 +149,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(require_ad
                 alert["dst_ip"]   = meta.get("dst_ip",   alert.get("dst_ip", ""))
                 alert["dst_port"] = str(meta.get("dst_port", alert.get("dst_port", "")))
                 alert["protocol"] = proto_str
+                _attach_endpoint_roles(alert)
                 
                 try:
                     alert_dst_port_int = int(alert.get("dst_port", 0) or 0)
@@ -139,6 +169,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(require_ad
                     confidence_pct=alert["confidence_pct"],
                     is_false_positive=False,
                     is_zero_day=alert["is_zero_day"],
+                    **_alert_role_kwargs(alert),
                     raw_features=flow_features
                 )
                 db.add(db_alert)
@@ -523,6 +554,7 @@ def _persist_manual_submission(result: dict, flow_preview: list[dict]) -> None:
             ))
 
         for alert in result.get("alerts", []):
+            _attach_endpoint_roles(alert)
             try:
                 dst_port = int(alert.get("dst_port", 0) or 0)
             except (TypeError, ValueError):
@@ -540,6 +572,7 @@ def _persist_manual_submission(result: dict, flow_preview: list[dict]) -> None:
                 confidence_pct=alert["confidence_pct"],
                 is_false_positive=False,
                 is_zero_day=alert["is_zero_day"],
+                **_alert_role_kwargs(alert),
                 raw_features=alert.get("raw_features", {}),
             ))
         db.commit()

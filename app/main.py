@@ -34,6 +34,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from sqlalchemy import inspect, text
 
 from app.routers import auth, training, detection, alerts, capture, dashboard, firewall, users
 from app.routers.auth import ensure_user_profile, get_password_hash
@@ -41,6 +42,20 @@ from app.core.database import engine
 from app.models.db_models import Base, BlockedIPDB, UserDB
 from app.core.database import SessionLocal
 from app.routers.firewall import _blocked_ips
+
+ALERT_ROLE_COLUMNS = (
+    "traffic_direction",
+    "flow_initiator_ip",
+    "flow_responder_ip",
+    "local_ip",
+    "remote_ip",
+    "suspected_attacker_ip",
+    "suspected_victim_ip",
+    "suspected_compromised_host",
+    "containment_target_ip",
+    "endpoint_role_confidence",
+    "endpoint_role_reason",
+)
 
 def _cors_origins() -> list[str]:
     raw = os.getenv("AIS_CORS_ORIGINS", "*")
@@ -55,6 +70,20 @@ def _seed_password(env_name: str, fallback: str) -> str:
     if os.getenv("AIS_DEPLOYMENT_MODE", "").lower() in {"production", "prod"}:
         raise RuntimeError(f"{env_name} must be set when AIS_DEPLOYMENT_MODE=production")
     return fallback
+
+
+def _repair_alert_schema() -> None:
+    """Add nullable endpoint role columns for existing SQLite installs."""
+    inspector = inspect(engine)
+    if "alerts" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("alerts")}
+    missing = [column for column in ALERT_ROLE_COLUMNS if column not in existing]
+    if not missing:
+        return
+    with engine.begin() as connection:
+        for column in missing:
+            connection.execute(text(f"ALTER TABLE alerts ADD COLUMN {column} VARCHAR"))
 
 
 # ── App factory ──────────────────────────────────────────────────────────
@@ -86,6 +115,7 @@ app.include_router(users.router)
 def on_startup():
     # Create tables
     Base.metadata.create_all(bind=engine)
+    _repair_alert_schema()
     
     db = SessionLocal()
     
