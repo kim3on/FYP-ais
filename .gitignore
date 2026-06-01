@@ -57,4 +57,5 @@ AGENTS.md
 # ── Secrets (never commit credentials) ────────────────────────────────────
 .env
 .env.*
+deploy/ais.env
 secrets.json

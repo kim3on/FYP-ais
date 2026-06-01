@@ -1,0 +1,20 @@
+.git
+.idea
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+*.bak
+.env
+.env.*
+frontend/node_modules
+frontend/vite_log.txt
+app/artefacts
+app/static_react
+datasets
+analysis/autoencoder_results
+1627 D FYP Final Report.pdf

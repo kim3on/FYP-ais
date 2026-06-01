@@ -1,0 +1,15 @@
+{
+	email {$CADDY_EMAIL}
+}
+
+{$AIS_SITE_ADDRESS} {
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy ais-api:8000
+}
