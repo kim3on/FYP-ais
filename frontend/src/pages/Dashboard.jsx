@@ -463,6 +463,9 @@ export default function Dashboard() {
   const displayFlows = captureRunning
     ? (liveFlowCount || liveRawFlows.length)
     : (captureStatus?.flows_completed || liveFlowCount || liveRawFlows.length || 0);
+  const captureStatusLabel = captureStatus?.remote_sensor_active
+    ? 'Remote sensor'
+    : (captureRunning ? 'Capturing…' : 'Idle');
 
   // Count anomalies in the last 5 minutes from the relevant alert source
   const alertsSource = captureRunning ? liveAlerts : alerts;
@@ -592,7 +595,7 @@ export default function Dashboard() {
             </div>
             <div className="capture-control-status">
               <span className={`status-dot ${captureRunning?'online':'offline'}`}/>
-              {captureRunning ? 'Capturing…' : 'Idle'}
+              {captureStatusLabel}
             </div>
           </div>
         </div>

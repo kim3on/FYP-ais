@@ -6,6 +6,7 @@ POST /api/capture/stop         — stop live packet capture
 GET  /api/capture/status       — current capture counters
 GET  /api/capture/interfaces   — list available network interfaces
 GET  /api/capture/chartdata    — last-60-s ring buffer for the live chart
+POST /api/capture/ingest-flow  — ingest one completed flow from a remote sensor
 WS   /ws/live                  — WebSocket push for real-time dashboard updates
 """
 
@@ -60,6 +61,43 @@ def _attach_endpoint_roles(alert: dict) -> dict:
 
 def _alert_role_kwargs(alert: dict) -> dict:
     return {field: alert.get(field) for field in ENDPOINT_ROLE_FIELDS}
+
+
+def _split_flow_payload(payload: dict) -> tuple[dict, dict]:
+    """
+    Accept either a raw CICIDS feature dict or:
+      {"features": {...}, "metadata": {"src_ip": "...", ...}}
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Flow payload must be a JSON object")
+
+    raw_features = payload.get("features") if isinstance(payload.get("features"), dict) else payload
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+
+    features = dict(raw_features)
+    meta = {}
+    for key in ("src_ip", "dst_ip", "src_port", "dst_port", "protocol"):
+        if key in metadata:
+            meta[key] = metadata[key]
+            features.pop(f"_{key}", None)
+            features.pop(key, None)
+        elif f"_{key}" in features:
+            meta[key] = features.pop(f"_{key}")
+        else:
+            meta[key] = features.pop(key, "")
+    return features, meta
+
+
+def _protocol_label(protocol) -> str:
+    proto_map = {6: "TCP", 17: "UDP", 1: "ICMP", "6": "TCP", "17": "UDP", "1": "ICMP"}
+    return proto_map.get(protocol, str(protocol).upper() if protocol not in ("", None) else "TCP")
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (ValueError, TypeError):
+        return default
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -213,6 +251,7 @@ async def start_capture(interface: Optional[str] = None, user=Depends(require_ad
 
     _state["sniffer"]        = sniffer
     _state["capture_active"] = True
+    _state["remote_sensor_active"] = False
 
     return {
         "message":   "Live capture started",
@@ -235,6 +274,7 @@ async def stop_capture(user=Depends(require_admin_user)):
         sniffer.stop(flush=False)
 
     _state["capture_active"] = False
+    _state["remote_sensor_active"] = False
     _state["sniffer"]        = None
 
     return {
@@ -266,9 +306,11 @@ async def capture_status(user=Depends(get_current_user)):
         "ws_clients":       len(_state["ws_clients"]),
         "sniffer_packets":  sniffer_packets,
         "sniffer_error":    _state.get("sniffer_error"),
-        "interface":        getattr(sniffer, "resolved_interface", None) or "default",
-        "capture_engine":   getattr(sniffer, "capture_engine", None) or "none",
+        "interface":        getattr(sniffer, "resolved_interface", None) or ("remote_sensor" if _state.get("remote_sensor_active") else "default"),
+        "capture_engine":   getattr(sniffer, "capture_engine", None) or ("remote_sensor" if _state.get("remote_sensor_active") else "none"),
         "flow_mode":        getattr(sniffer, "flow_mode", None) or "none",
+        "remote_sensor_active": bool(_state.get("remote_sensor_active")),
+        "remote_sensor_last_seen": _state.get("remote_sensor_last_seen"),
     }
 
 
@@ -293,6 +335,103 @@ async def chart_data(user=Depends(get_current_user)):
         "anomaly":         _state["chart_anomaly"],
         "total_packets":   _state["packet_count"],
         "total_anomalies": _state["anomaly_count"],
+    }
+
+
+@router.post("/api/capture/ingest-flow")
+async def ingest_remote_flow(payload: dict, user=Depends(require_admin_user)):
+    """
+    Ingest one completed CICIDS-compatible flow from a remote sensor.
+
+    Packet capture runs on the laptop/lab machine where the traffic exists;
+    the Droplet handles inference, persistence, and dashboard streaming.
+    """
+    if _state.get("active_dataset_type") != DATASET_CICIDS2017:
+        raise HTTPException(
+            status_code=400,
+            detail="Remote sensor ingest is CICIDS2017-only. Train or select a CICIDS2017 model first.",
+        )
+    if not engine_ready(_state["active_model"], DATASET_CICIDS2017):
+        raise HTTPException(status_code=400, detail=f"{_state['active_model']} is not ready. Train first, then ingest sensor flows.")
+
+    flow_features, meta = _split_flow_payload(payload)
+    engine = _build_engine(DATASET_CICIDS2017)
+
+    try:
+        result = engine.detect_sample(flow_features)
+    except Exception as exc:
+        logger.exception("Remote sensor flow detection failed.")
+        raise HTTPException(status_code=400, detail=f"Remote sensor flow detection failed: {exc}") from exc
+
+    _state["capture_active"] = True
+    _state["remote_sensor_active"] = True
+    _state["remote_sensor_last_seen"] = datetime.datetime.utcnow().isoformat()
+    _state["packet_count"] += 1
+    _state["flows_completed"] += 1
+    _state["chart_normal"].pop(0)
+    _state["chart_anomaly"].pop(0)
+
+    proto_str = _protocol_label(meta.get("protocol", flow_features.get("Protocol", "TCP")))
+    timestamp = datetime.datetime.utcnow().isoformat()
+
+    db = SessionLocal()
+    try:
+        db.add(RawFlowDB(
+            timestamp=timestamp,
+            src_ip=str(meta.get("src_ip", "")),
+            dst_ip=str(meta.get("dst_ip", "")),
+            dst_port=_safe_int(meta.get("dst_port")),
+            protocol=proto_str,
+            flow_bytes_s=float(flow_features.get("Flow Bytes/s", 0.0) or 0.0),
+        ))
+
+        if result["anomalies_found"] > 0:
+            _state["anomaly_count"] += 1
+            _state["chart_normal"].append(0)
+            _state["chart_anomaly"].append(1)
+
+            for alert in result["alerts"]:
+                alert["src_ip"] = str(meta.get("src_ip") or alert.get("src_ip", ""))
+                alert["dst_ip"] = str(meta.get("dst_ip") or alert.get("dst_ip", ""))
+                alert["dst_port"] = str(meta.get("dst_port") or alert.get("dst_port", ""))
+                alert["protocol"] = proto_str
+                _attach_endpoint_roles(alert)
+
+                db.add(AlertDB(
+                    alert_id=alert["alert_id"],
+                    timestamp=alert["timestamp"],
+                    attack_type=alert["attack_type"],
+                    src_ip=alert["src_ip"],
+                    dst_ip=alert["dst_ip"],
+                    dst_port=_safe_int(alert.get("dst_port")),
+                    protocol=alert["protocol"],
+                    severity=alert["severity"],
+                    confidence=alert["confidence"],
+                    confidence_pct=alert["confidence_pct"],
+                    is_false_positive=False,
+                    is_zero_day=alert["is_zero_day"],
+                    **_alert_role_kwargs(alert),
+                    raw_features=flow_features,
+                ))
+            _state["alerts"].extend(result["alerts"])
+        else:
+            _state["chart_normal"].append(1)
+            _state["chart_anomaly"].append(0)
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Remote sensor ingest persistence failed.")
+        raise HTTPException(status_code=500, detail=f"Remote sensor ingest persistence failed: {exc}") from exc
+    finally:
+        db.close()
+
+    await _broadcast_live_update(result, meta, flow_features)
+    return {
+        "message": "Remote sensor flow ingested",
+        "anomalies_found": result.get("anomalies_found", 0),
+        "flows_completed": _state["flows_completed"],
+        "packet_count": _state["packet_count"],
     }
 
 

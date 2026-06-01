@@ -16,6 +16,18 @@ Recommended starting point:
 SSH into the Droplet, then run:
 
 ```bash
+ssh -i /path/to/private_key root@your_droplet_ip
+```
+
+On Windows PowerShell, for example:
+
+```powershell
+ssh -i C:\Users\kimeon\fyp_droplet root@your_droplet_ip
+```
+
+Then install Docker inside the Droplet:
+
+```bash
 sudo apt update
 sudo apt install -y ca-certificates curl git
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -38,6 +50,8 @@ cd /opt/ais-detect
 If the repo is private, use GitHub SSH keys or a deploy key.
 
 ## 4. Create Production Environment File
+
+Create the real env file on the Droplet. Do not commit `deploy/ais.env`.
 
 ```bash
 cp deploy/ais.env.example deploy/ais.env
@@ -76,7 +90,13 @@ AIS_CORS_ORIGINS=https://ais-detect.example.com
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs -f ais-api
+```
+
+Expected services:
+
+```text
+ais-api   Up ... healthy
+caddy     Up ... 0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
 ```
 
 Open:
@@ -86,6 +106,15 @@ http://your_droplet_ip
 ```
 
 or your HTTPS domain once DNS is ready.
+
+Expected routes:
+
+```text
+/       React frontend dashboard/login
+/api    backend API landing page
+/docs   Swagger API documentation
+/health health check
+```
 
 ## 6. Updating After Code Changes
 
@@ -106,6 +135,86 @@ docker compose up -d --build
 ```
 
 The SQLite database and trained model artifacts are stored in the Docker volume `ais_artefacts`, so rebuilding the app container does not erase them.
+
+## 7. Run Your Laptop as the Sensor
+
+The server-side interface dropdown shows the Droplet/container interfaces, such as `eth0`. That is expected. To monitor traffic from your laptop or lab machine, run the local sensor agent on that machine and let it send completed flow features to the deployed backend.
+
+Prerequisites on the sensor machine:
+
+- Python virtual environment with `requirements.txt` installed
+- Administrator/root terminal for packet capture
+- Windows only: Npcap installed
+- A trained CICIDS2017 model on the deployed backend
+
+List local capture interfaces:
+
+```powershell
+cd C:\Users\kimeon\Desktop\ais-backend
+.\.venv\Scripts\activate
+python scripts\local_sensor.py --api-base https://ais-detect-152-42-209-219.nip.io --list-interfaces
+```
+
+Run the sensor with the default Scapy interface:
+
+```powershell
+python scripts\local_sensor.py --api-base https://ais-detect-152-42-209-219.nip.io --username admin
+```
+
+Run the sensor with a selected interface:
+
+```powershell
+python scripts\local_sensor.py --api-base https://ais-detect-152-42-209-219.nip.io --username admin --interface "Wi-Fi"
+```
+
+The agent prompts for the AIS-Detect password, captures packets locally, converts them into CICIDS-compatible flows, and posts them to:
+
+```text
+POST /api/capture/ingest-flow
+```
+
+The dashboard should then show live counters and alerts from the remote sensor. Use the dashboard Stop button or `Ctrl+C` in the sensor terminal to stop the session.
+
+## Troubleshooting
+
+If SSH fails with `Permission denied (publickey)`, specify the private key, not the `.pub` file:
+
+```powershell
+ssh -i C:\Users\kimeon\fyp_droplet root@your_droplet_ip
+```
+
+If `cp deploy/ais.env.example deploy/ais.env` says the file does not exist, make sure you are inside the cloned project:
+
+```bash
+cd /opt/ais-detect
+ls deploy
+```
+
+If `docker compose up -d --build` fails during `pip install`, inspect the build log:
+
+```bash
+docker compose build --no-cache ais-api 2>&1 | tee build.log
+tail -n 80 build.log
+```
+
+`cicflowmeter` requires Python 3.12 or newer, so the deployment Dockerfile must use a Python 3.12 base image.
+
+If `http://your_droplet_ip/` still shows the backend API page instead of the React app, confirm the latest code was pushed and pulled:
+
+```bash
+cd /opt/ais-detect
+git pull
+docker compose up -d --build
+```
+
+Then hard refresh the browser with `Ctrl+F5`. The backend landing page should be at `/api`, not `/`.
+
+Useful log commands:
+
+```bash
+docker compose logs --tail=80 ais-api
+docker compose logs --tail=80 caddy
+```
 
 ## Notes
 
