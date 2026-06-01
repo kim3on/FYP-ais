@@ -181,6 +181,24 @@ GET /api/capture/sensor-control
 
 so the dashboard Stop button can request a clean shutdown. Use either the dashboard Stop button or `Ctrl+C` in the sensor terminal to stop the session.
 
+## 8. Blocklist Behavior
+
+On the deployed Linux/DigitalOcean app, the alert action is blocklist-only:
+
+```text
+Blocklist button -> store IP in SQLite -> show it in the Blocklist tab
+```
+
+It does not run Linux firewall commands on the Droplet. That is intentional because the suspicious traffic is detected by the laptop sensor, not by the Droplet network stack.
+
+For local Windows development, opening the app with `?dev=1` requests Windows Firewall enforcement:
+
+```text
+http://localhost:5173/alerts?dev=1
+```
+
+The backend only honors that request when it is running on Windows. On Linux/Docker, it still falls back to blocklist-only.
+
 ## Troubleshooting
 
 If SSH fails with `Permission denied (publickey)`, specify the private key, not the `.pub` file:

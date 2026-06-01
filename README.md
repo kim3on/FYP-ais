@@ -244,6 +244,16 @@ PATCH /api/settings            → switch active model (nsa | isolation_forest)
 GET  /health                   → { status: "ok", version: "4.0.0" }
 ```
 
+### Blocklist
+```
+POST /api/firewall/block        → add IP to AIS-Detect blocklist
+POST /api/firewall/block?dev=1  → on Windows only, also create a Windows Firewall rule
+POST /api/firewall/unblock      → remove IP from blocklist and matching Windows rule when applicable
+GET  /api/firewall/blocked      → list blocklisted IPs and enforcement mode
+```
+
+Normal/deployed mode is blocklist-only. The `?dev=1` path is for local Windows testing and is ignored as firewall enforcement on Linux/Docker.
+
 ---
 
 ## Configuration Parameters
@@ -381,7 +391,7 @@ The May 6 update addresses the original critical demo-auth findings:
 
 - Demo tokens were replaced with signed JWTs.
 - Default seeded passwords are hashed with bcrypt.
-- Training, detection, alerts, capture, dashboard stats/settings, and firewall routes are protected by authentication dependencies.
+- Training, detection, alerts, capture, dashboard stats/settings, and blocklist routes are protected by authentication dependencies.
 - Live WebSocket access requires a token.
 
 Remaining deployment hardening before public production use:
@@ -398,6 +408,6 @@ Remaining deployment hardening before public production use:
 ## Database Persistence
 The system uses a persistent local **SQLite database** (`app/artefacts/ais_detect.db`) managed via **SQLAlchemy ORM**.
 - **`alerts`**: Stores every anomaly flagged by the engine.
-- **`blocked_ips`**: Persistent registry for inbound Windows Firewall block rules.
+- **`blocked_ips`**: Persistent registry for AIS-Detect blocklist entries. Local Windows dev mode can also create matching Windows Firewall rules.
 - **`raw_flows`**: Archives live packet flows captured by the sniffer.
 - **`user_profiles`**: Stores optional operator profile metadata.

@@ -15,7 +15,7 @@ import '../components/Layout/Layout.css';
 import './Alerts.css';
 
 export default function Alerts() {
-  const { alerts, setAlerts } = useApp();
+  const { alerts, setAlerts, devMode } = useApp();
   const [loading, setLoading] = useState(false);
   const [filter, setFilter]   = useState('all');
   const [tab, setTab]         = useState('alerts'); // 'alerts' | 'blocked'
@@ -50,13 +50,13 @@ export default function Alerts() {
     }
   }, [setAlerts]);
 
-  // ── Fetch blocked IPs ────────────────────────────────────────
+  // ── Fetch blocklist ──────────────────────────────────────────
   const refreshBlocked = useCallback(async () => {
     try {
       const data = await getBlockedIPs();
       setBlockedIPs(data.blocked || []);
     } catch(err) {
-      console.error("Failed to fetch blocked IPs:", err);
+      console.error("Failed to fetch blocklist:", err);
     }
   }, []);
 
@@ -83,10 +83,13 @@ export default function Alerts() {
   async function handleBlockIP(ip, reason) {
     setBlockError('');
     try {
-      await blockIP(ip, reason || 'Blocked by AIS-Detect');
+      const result = await blockIP(ip, reason || 'Blocklisted by AIS-Detect', devMode);
       await refreshBlocked();
+      if (result.mode === 'windows_firewall') {
+        setBlockError('');
+      }
     } catch(e) {
-      setBlockError(e.message || 'Failed to block IP. Is the backend running as Administrator?');
+      setBlockError(e.message || 'Failed to add IP to blocklist.');
     }
   }
 
@@ -96,7 +99,7 @@ export default function Alerts() {
       await unblockIP(ip);
       await refreshBlocked();
     } catch(e) {
-      setBlockError(e.message || 'Failed to unblock IP.');
+      setBlockError(e.message || 'Failed to remove IP from blocklist.');
     }
   }
 
@@ -209,7 +212,7 @@ export default function Alerts() {
           <div className="stat-value" style={{color:counts.zeroDay>0?'var(--iris)':'var(--text-primary)'}}>{counts.zeroDay.toLocaleString()}</div>
         </div>
         <div className="stat-card" style={{borderColor:blockedIPs.length>0?'var(--danger-border)':'var(--border)'}}>
-          <div className="stat-label" style={{color:'var(--danger)'}}>Blocked IPs</div>
+          <div className="stat-label" style={{color:'var(--danger)'}}>Blocklisted IPs</div>
           <div className="stat-value" style={{color:blockedIPs.length>0?'var(--danger)':'var(--text-primary)'}}>{blockedIPs.length}</div>
         </div>
       </div>
@@ -244,7 +247,7 @@ export default function Alerts() {
             borderBottom: tab==='blocked' ? '2px solid var(--danger)' : '2px solid transparent',
           }}
         >
-          Blocked IPs {blockedIPs.length > 0 && <span style={{marginLeft:'6px',background:'var(--danger)',color:'#fff',padding:'1px 6px',borderRadius:'8px',fontSize:'10px'}}>{blockedIPs.length}</span>}
+          Blocklist {blockedIPs.length > 0 && <span style={{marginLeft:'6px',background:'var(--danger)',color:'#fff',padding:'1px 6px',borderRadius:'8px',fontSize:'10px'}}>{blockedIPs.length}</span>}
         </button>
       </div>
 
@@ -288,12 +291,12 @@ export default function Alerts() {
         </>
       )}
 
-      {/* ── Blocked IPs Tab ─────────────────────────────────────── */}
+      {/* ── Blocklist Tab ───────────────────────────────────────── */}
       {tab === 'blocked' && (
         <div className="card">
           {blockedIPs.length === 0 ? (
             <div style={{textAlign:'center',padding:'32px 16px',color:'var(--text-tertiary)',fontFamily:'var(--font-mono)',fontSize:'12px'}}>
-              No IPs currently blocked
+              No IPs currently blocklisted
             </div>
           ) : (
             <div className="table-wrap">
@@ -301,9 +304,9 @@ export default function Alerts() {
                 <thead>
                   <tr>
                     <th>IP Address</th>
-                    <th>Blocked At</th>
+                    <th>Listed At</th>
                     <th>Reason</th>
-                    <th>Firewall Rule</th>
+                    <th>Mode</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -318,7 +321,7 @@ export default function Alerts() {
                       </td>
                       <td style={{fontSize:'12px'}}>{b.reason || '—'}</td>
                       <td style={{fontSize:'11px',fontFamily:'var(--font-mono)',color:'var(--text-tertiary)'}}>
-                        {b.rule_name || '—'}
+                        {b.mode === 'windows_firewall' ? 'Windows Firewall' : 'Blocklist Only'}
                       </td>
                       <td>
                         <button
@@ -326,7 +329,7 @@ export default function Alerts() {
                           style={{fontSize:'11px',padding:'3px 10px',color:'var(--success)'}}
                           onClick={() => handleUnblock(b.ip)}
                         >
-                          ✓ Unblock
+                          Remove
                         </button>
                       </td>
                     </tr>

@@ -194,9 +194,9 @@ export async function submitFlowFile(file, limit = 1000) {
   return res.json();
 }
 
-// ── Firewall / IP Blocking ────────────────────────────────────
-export async function blockIP(ip, reason) {
-  return apiFetch('/api/firewall/block', {
+// ── Firewall / IP Blocklist ───────────────────────────────────
+export async function blockIP(ip, reason, devMode = false) {
+  return apiFetch(`/api/firewall/block${devMode ? '?dev=1' : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ip, reason }),

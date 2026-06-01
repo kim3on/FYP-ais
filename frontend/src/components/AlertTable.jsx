@@ -1,6 +1,6 @@
 /**
  * AlertTable — reusable alert table used on Dashboard, Alerts, and Detection pages.
- * Handles zero-day highlighting, severity badges, false-positive marking, and IP blocking.
+ * Handles zero-day highlighting, severity badges, false-positive marking, and IP blocklisting.
  * Paginated to avoid DOM thrashing with large result sets.
  */
 import { useState, useMemo } from 'react';
@@ -135,13 +135,13 @@ export default function AlertTable({ alerts = [], onMarkFP, onBlockIP, blockedIP
                           className="btn btn-danger"
                           style={{ fontSize: '10px', padding: '4px 8px' }}
                           onClick={() => onBlockIP && onBlockIP(remoteIp, a.attack_type)}
-                          title={`Block remote endpoint ${remoteIp}`}
+                          title={`Add remote endpoint ${remoteIp} to blocklist`}
                         >
-                          BLOCK
+                          BLOCKLIST
                         </button>
                       )}
                       {remoteIp && targetBlocked && (
-                        <span className="badge critical" style={{ opacity: 0.8 }}>LOCKED</span>
+                        <span className="badge critical" style={{ opacity: 0.8 }}>LISTED</span>
                       )}
                       {!remoteIp && (
                         <button
