@@ -6,7 +6,7 @@ GET   /api/dashboard/stats   — aggregate counts for the four stat cards
 GET   /api/model/summary     — metadata for both trained models
 PATCH /api/settings          — switch active model / alert threshold
 GET   /health                — simple health check
-GET   /                      — HTML landing page with API overview
+GET   /api                   — HTML landing page with API overview
 """
 
 from datetime import datetime
@@ -240,7 +240,7 @@ async def health():
 #  HTML LANDING PAGE
 # ═══════════════════════════════════════════════════════════════════════
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/api", response_class=HTMLResponse)
 async def root():
     """Landing page with API overview and quick links."""
     ready        = models_ready()
