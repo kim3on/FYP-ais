@@ -17,7 +17,7 @@ import threading
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from sklearn.model_selection import train_test_split
 
@@ -171,7 +171,7 @@ class TrainingPipeline:
         log_callback=None,       # callable(str) — streams logs to caller
         filename: str = '',      # original upload filename for format detection
     ) -> dict:
-        t0 = datetime.now()
+        t0 = datetime.now(timezone.utc)
 
         def log(msg: str):
             ts = datetime.now().strftime("%H:%M:%S")
@@ -583,7 +583,7 @@ class TrainingPipeline:
         log("[OK] Models saved successfully (NSA, ISO, raw SB, representation SB, Preprocessor).")
 
         # ── 9. COMPILE RESULT ──────────────────────────────────────────
-        duration = (datetime.now() - t0).total_seconds()
+        duration = (datetime.now(timezone.utc) - t0).total_seconds()
         log(f"[METRICS] Total pipeline duration: {duration:.2f} seconds")
         log("[SYSTEM] Status: LEARNING -> ACTIVE")
 

@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
+from app.core.time_utils import (
+    format_malaysia_timestamp,
+    malaysia_filename_timestamp,
+    now_malaysia_timestamp,
+    parse_datetime_as_utc,
+)
 from app.models.db_models import AlertDB, BlockedIPDB
 from app.routers.auth import get_current_user
 
@@ -115,7 +121,7 @@ def _load_blocklist(db: Session) -> dict[str, dict]:
     return {
         entry.ip: {
             "ip": entry.ip,
-            "blocked_at": entry.blocked_at,
+            "blocked_at": format_malaysia_timestamp(entry.blocked_at),
             "reason": entry.reason,
             "rule_name": entry.rule_name,
             "mode": _blocklist_mode(entry.rule_name),
@@ -213,14 +219,7 @@ def _write_csv_section(writer, title: str, headers: list[str], rows: list[list])
 
 
 def _parse_timestamp_for_sort(value: str) -> datetime:
-    raw = value or ""
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
+    return parse_datetime_as_utc(value) or datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _percentage(count: int, total: int) -> str:
@@ -275,8 +274,8 @@ def _build_alert_summaries(alerts: list[AlertDB], exported_at: str, blocklist: d
 
     report_overview = [
         ["exported_at", exported_at],
-        ["actual_first_seen", sorted_alerts[0].timestamp if sorted_alerts else ""],
-        ["actual_last_seen", sorted_alerts[-1].timestamp if sorted_alerts else ""],
+        ["actual_first_seen", format_malaysia_timestamp(sorted_alerts[0].timestamp) if sorted_alerts else ""],
+        ["actual_last_seen", format_malaysia_timestamp(sorted_alerts[-1].timestamp) if sorted_alerts else ""],
         ["total_alerts", total],
         ["false_positive_count", false_positive_count],
         ["zero_day_count", zero_day_count],
@@ -385,8 +384,8 @@ def _build_alert_summaries(alerts: list[AlertDB], exported_at: str, blocklist: d
             dst_port,
             protocol,
             len(items),
-            alerts_in_group[0].timestamp if alerts_in_group else "",
-            alerts_in_group[-1].timestamp if alerts_in_group else "",
+            format_malaysia_timestamp(alerts_in_group[0].timestamp) if alerts_in_group else "",
+            format_malaysia_timestamp(alerts_in_group[-1].timestamp) if alerts_in_group else "",
             _max_severity(alerts_in_group),
             max(item["risk"] for item in items),
         ])
@@ -405,7 +404,7 @@ def _build_alert_summaries(alerts: list[AlertDB], exported_at: str, blocklist: d
         priority_incidents.append([
             rank,
             alert.alert_id,
-            alert.timestamp,
+            format_malaysia_timestamp(alert.timestamp),
             item["severity"],
             item["family"],
             alert.attack_type or "Unknown",
@@ -494,7 +493,7 @@ async def export_alerts_csv(
         .all()
     )
 
-    exported_at = datetime.now(timezone.utc).isoformat()
+    exported_at = now_malaysia_timestamp()
     blocklist = _load_blocklist(db)
     summaries = _build_alert_summaries(alerts, exported_at, blocklist)
 
@@ -513,7 +512,7 @@ async def export_alerts_csv(
         _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "traffic_direction", "local_ip", "remote_ip", "dst_port", "is_blocklisted", "blocklist_mode", "action_code"], summaries["priority_incidents"])
         _write_csv_section(writer, "Action Legend", ["action_code", "explanation"], summaries["action_legend"])
 
-    filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename_ts = malaysia_filename_timestamp()
     return Response(
         content="\ufeff" + output.getvalue(),
         media_type="text/csv",
@@ -556,7 +555,7 @@ async def export_raw_alerts_csv(
         row = [
             alert.id,
             alert.alert_id,
-            alert.timestamp,
+            format_malaysia_timestamp(alert.timestamp),
             alert.attack_type,
             alert.src_ip,
             alert.dst_ip,
@@ -572,7 +571,7 @@ async def export_raw_alerts_csv(
         ]
         writer.writerow([_csv_safe(cell) for cell in row])
 
-    filename_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename_ts = malaysia_filename_timestamp()
     return Response(
         content="\ufeff" + output.getvalue(),
         media_type="text/csv",

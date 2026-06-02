@@ -41,11 +41,16 @@ function alertKey(alert) {
 
 function prependUniqueAlert(prev, alert, limit) {
   if (!alert) return prev;
-  const key = alertKey(alert);
+  const normalized = alert.received_at ? alert : { ...alert, received_at: new Date().toISOString() };
+  const key = alertKey(normalized);
   if (key && prev.some(existing => alertKey(existing) === key)) {
-    return prev;
+    return prev.map(existing => (
+      alertKey(existing) === key && !existing.received_at
+        ? { ...existing, received_at: normalized.received_at }
+        : existing
+    ));
   }
-  return [alert, ...prev].slice(0, limit);
+  return [normalized, ...prev].slice(0, limit);
 }
 
 export function AppProvider({ children }) {

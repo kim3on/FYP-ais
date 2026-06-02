@@ -399,7 +399,7 @@ class DetectionEngine:
 
             alert = AlertRecord(
                 alert_id=str(uuid.uuid4())[:8].upper(),
-                timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 src_ip=src_ip,
                 dst_ip=dst_ip,
                 dst_port=dst_port,

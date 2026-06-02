@@ -13,6 +13,24 @@
  *   WS   /ws/live
  */
 
+const MALAYSIA_TIME_ZONE = 'Asia/Kuala_Lumpur';
+
+function malaysiaFilenameTimestamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: MALAYSIA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}${values.month}${values.day}_${values.hour}${values.minute}${values.second}`;
+}
+
 // ── Auth ──────────────────────────────────────────────────────
 export async function login(username, password) {
   let res;
@@ -75,7 +93,7 @@ export async function exportAlertsCSV(params = {}) {
   const match = disposition.match(/filename="?([^"]+)"?/i);
   return {
     blob,
-    filename: match?.[1] || `alerts_summary_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+    filename: match?.[1] || `alerts_summary_${malaysiaFilenameTimestamp()}.csv`,
   };
 }
 export async function exportRawAlertsCSV(params = {}) {
@@ -93,7 +111,7 @@ export async function exportRawAlertsCSV(params = {}) {
   const match = disposition.match(/filename="?([^"]+)"?/i);
   return {
     blob,
-    filename: match?.[1] || `alerts_raw_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+    filename: match?.[1] || `alerts_raw_${malaysiaFilenameTimestamp()}.csv`,
   };
 }
 
@@ -139,7 +157,7 @@ export async function exportTrainingRunsCSV(params = {}) {
   const match = disposition.match(/filename="?([^"]+)"?/i);
   return {
     blob,
-    filename: match?.[1] || `training_runs_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`,
+    filename: match?.[1] || `training_runs_${malaysiaFilenameTimestamp()}.csv`,
   };
 }
 

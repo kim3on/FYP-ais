@@ -51,6 +51,7 @@ const LINE_OPTS = {
 
 const TRAFFIC_NORMAL_COLOR = '#2f80ff';
 const TRAFFIC_ANOMALY_COLOR = '#ff2b2b';
+const MALAYSIA_TIME_ZONE = 'Asia/Kuala_Lumpur';
 
 const DONUT_OPTS = {
   responsive: true, maintainAspectRatio: false, animation: false,
@@ -64,21 +65,52 @@ function csvEscape(value) {
   return text;
 }
 
-function timestampForFilename(date = new Date()) {
-  const pad = value => String(value).padStart(2, '0');
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    '_',
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join('');
+function malaysiaDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: MALAYSIA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map(part => [part.type, part.value]));
 }
 
-function featureValueForExport(value) {
+function timestampForFilename(date = new Date()) {
+  const parts = malaysiaDateParts(date);
+  return `${parts.year}${parts.month}${parts.day}_${parts.hour}${parts.minute}${parts.second}`;
+}
+
+function alertTimeMs(value) {
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+
+  const raw = String(value).trim();
+  if (!raw) return 0;
+
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const parsed = Date.parse(hasTimezone ? normalized : `${normalized}Z`);
+  if (Number.isFinite(parsed)) return parsed;
+
+  const fallback = Date.parse(raw);
+  return Number.isFinite(fallback) ? fallback : 0;
+}
+
+function formatMalaysiaTimestamp(value, fallback = '') {
+  const ms = alertTimeMs(value);
+  if (!Number.isFinite(ms) || ms <= 0) return fallback;
+  const parts = malaysiaDateParts(new Date(ms));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} MYT`;
+}
+
+function featureValueForExport(value, key = '') {
   if (value == null) return '';
+  if (String(key).toLowerCase() === 'timestamp') return formatMalaysiaTimestamp(value, String(value));
   if (typeof value === 'number') return Number.isFinite(value) ? value : '';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'object') return JSON.stringify(value);
@@ -190,6 +222,7 @@ export default function Dashboard() {
   const [flowSubmitError, setFlowSubmitError] = useState('');
   const role = (currentUser?.role || '').toLowerCase();
   const canControlCapture = role.includes('administrator') || role === 'admin';
+  const [recentClockMs, setRecentClockMs] = useState(0);
 
   useEffect(() => {
     if (!currentUser?.role) {
@@ -198,6 +231,13 @@ export default function Dashboard() {
       });
     }
   }, [currentUser?.role, refreshCurrentUser]);
+
+  useEffect(() => {
+    const tick = () => setRecentClockMs(Date.now());
+    tick();
+    const id = setInterval(tick, 15000);
+    return () => clearInterval(id);
+  }, []);
 
   // WebSocket — active whenever captureRunning is true
   useWebSocket('/ws/live', useCallback((msg) => {
@@ -374,13 +414,13 @@ export default function Dashboard() {
     const csv = [
       header.map(csvEscape).join(','),
       ...liveRawFlows.map(f => [
-        f.timestamp,
+        formatMalaysiaTimestamp(f.timestamp, f.timestamp),
         f.src_ip,
         f.dst_ip,
         f.dst_port,
         f.protocol,
         Number.isFinite(Number(f.flow_bytes_s)) ? Math.round(Number(f.flow_bytes_s)) : '',
-        ...featureKeys.map(key => featureValueForExport(f.flow_features?.[key])),
+        ...featureKeys.map(key => featureValueForExport(f.flow_features?.[key], key)),
       ].map(csvEscape).join(','))
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -475,10 +515,10 @@ export default function Dashboard() {
 
   // Count anomalies in the last 5 minutes from the relevant alert source
   const alertsSource = captureRunning ? liveAlerts : alerts;
+  const recentCutoffMs = recentClockMs > 0 ? recentClockMs - 5 * 60 * 1000 : Number.POSITIVE_INFINITY;
   const recentAnomalyCount = alertsSource.filter(a => {
-    const ts = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-    const now = new Date().getTime(); // Still impure, but let's see if this format is preferred or if we should use useMemo
-    return ts >= (now - 5 * 60 * 1000);
+    const ts = alertTimeMs(a.timestamp || a.received_at);
+    return ts >= recentCutoffMs;
   }).length;
 
   const sevLevel = getSeverityLevel(alerts);

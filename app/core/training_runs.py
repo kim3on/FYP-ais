@@ -14,6 +14,7 @@ import os
 from typing import Iterable
 
 from app.core.datasets import ARTEFACT_DIR, normalize_dataset_type
+from app.core.time_utils import format_malaysia_timestamp
 
 
 TRAINING_RUNS_PATH = os.path.join(ARTEFACT_DIR, "training_runs.jsonl")
@@ -238,7 +239,7 @@ def training_records_to_csv(records: Iterable[dict]) -> str:
         iso = _safe_get(record, "models", "isolation_forest", default={})
         writer.writerow({
             "run_id": record.get("run_id"),
-            "trained_at": record.get("trained_at"),
+            "trained_at": format_malaysia_timestamp(record.get("trained_at"), fallback=record.get("trained_at") or ""),
             "dataset_type": record.get("dataset_type"),
             "duration_seconds": record.get("duration_seconds"),
             "target_fpr": record.get("target_fpr"),

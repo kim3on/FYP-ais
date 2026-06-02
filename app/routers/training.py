@@ -9,7 +9,6 @@ GET  /api/train/result       — retrieve last training result
 import json
 import os
 import traceback
-from datetime import datetime
 import numpy as np
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, Depends
@@ -44,6 +43,7 @@ from app.core.training_runs import (
     list_training_run_records,
     training_records_to_csv,
 )
+from app.core.time_utils import malaysia_filename_timestamp
 from app.state import _state, save_runtime_settings
 from app.routers.auth import get_current_user
 
@@ -230,7 +230,7 @@ async def training_runs_export(dataset_type: str | None = None, limit: int = 200
     selected = normalize_dataset_type(dataset_type) if dataset_type else None
     records = _training_run_records_with_latest_fallback(selected, limit)
     csv_text = training_records_to_csv(records)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    stamp = malaysia_filename_timestamp()
     dataset_part = selected or "all"
     return Response(
         content="\ufeff" + csv_text,
