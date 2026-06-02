@@ -11,7 +11,7 @@
 - **Confidence and Zero-Day Semantics:** Documentation now clarifies that confidence is normalized anomaly strength, not attack probability, and that a zero-day candidate is a high-novelty unknown anomaly for analyst review.
 - **Dev-Only DAE Representation:** PCA remains the default public path. Denoising Autoencoder representation is hidden behind `?dev=1`, CICIDS2017-only, and intended for experiments.
 - **Target FPR Training Control:** The Training tab exposes BENIGN-only target FPR calibration from `1%` to `20%`; the current default is `10%`.
-- **Updated Alert Exports:** Alert summary CSV includes direction summary and top remote endpoints while preserving raw CSV export for audit.
+- **Updated Alert Exports:** Alert summary CSV includes direction summary and top endpoints while preserving raw CSV export for audit.
 
 ## Earlier System Updates (May 2026)
 
@@ -35,7 +35,7 @@
 ### May 6 Security & ML Update
 - **JWT Authentication:** Replaced demo tokens with signed JWT authentication. Passwords are stored as bcrypt hashes, and non-health API routes now require authenticated access.
 - **Secured WebSocket Access:** Live WebSocket connections now require a valid token instead of exposing alert snapshots publicly.
-- **Alert Summary Export:** Added a backend-generated alert summary CSV with severity and attack-family rollups, top sources/targets, repeated endpoint pairs, priority incidents, and action-code guidance.
+- **Alert Summary Export:** Added a backend-generated alert summary CSV with severity and attack-family rollups, top sources/endpoints, repeated endpoint pairs, priority incidents, and simple action guidance.
 - **PCA-Safe NSA Geometry:** Updated the preprocessing/model path to use RobustScaler + PCA whitening, dynamic NSA thresholds, and detector generation in the actual PCA feature space instead of assuming `[0, 1]` bounds.
 - **False Positive Rate Visibility:** Exposed FPR in training/detection result views to make model evaluation more useful for FYP analysis.
 
@@ -231,10 +231,10 @@ GET   /api/alerts/export_raw.csv → flat raw alert CSV export
 
 The CSV export is generated from the SQLite alert database, not only the visible
 frontend table. It is a sectioned triage report with a report overview, severity,
-attack-family and direction summaries, top sources/targets, top remote endpoints,
-repeated endpoint pairs, priority incidents, and an action legend for FYP reporting
-and analyst review. Both the summary export and raw alert export include
-blocklist status/mode metadata for matching remote endpoints.
+attack-family and direction summaries, top sources/endpoints, repeated endpoint
+pairs, priority incidents, and a simple action legend for FYP reporting and
+analyst review. Both the summary export and raw alert export include blocklist
+status metadata for matching endpoints.
 
 ### Dashboard & Settings
 ```

@@ -460,7 +460,7 @@ Exports:
 | `GET /api/alerts/export_raw.csv` | Flat alert-row CSV |
 | `GET /api/train/runs/export.csv` | Historical training-run comparison CSV |
 
-The alert summary CSV is generated from SQLite, not only currently visible frontend rows. It includes report overview, severity summary, attack-family summary, direction summary, top sources/targets, top remote endpoints, repeated endpoint pairs, priority incidents, and action legend.
+The alert summary CSV is generated from SQLite, not only currently visible frontend rows. It includes report overview, severity summary, attack-family summary, direction summary, top sources/endpoints, repeated endpoint pairs, priority incidents, and a simple action legend.
 
 ---
 

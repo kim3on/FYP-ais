@@ -31,14 +31,8 @@ router = APIRouter(
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 SEVERITY_BASE_SCORE = {"critical": 90, "high": 70, "medium": 50, "low": 30}
 ACTION_LEGEND = {
-    "FP_AUDIT": "False positive retained for review/audit; no immediate response required.",
-    "MANUAL_ZERO_DAY": "Manually inspect raw flow context and monitor recurrence because this is a zero-day candidate.",
-    "INVESTIGATE_NOW": "Prioritize investigation; consider containment or source blocking if corroborated.",
-    "REVIEW_AUTH": "Review authentication logs and enforce account lockout or credential controls.",
-    "CHECK_EXPOSURE": "Check exposed services and monitor for follow-up exploitation.",
-    "RATE_LIMIT": "Validate traffic volume and apply rate limiting or upstream filtering where appropriate.",
-    "REVIEW_WEB": "Review web access logs and inspect the affected application endpoint.",
-    "MONITOR": "Monitor and correlate with host, firewall, and application logs.",
+    "MONITOR": "Monitor and review if the pattern repeats.",
+    "INVESTIGATE_NOW": "Prioritize investigation immediately.",
 }
 ENDPOINT_ROLE_FIELDS = [
     "traffic_direction",
@@ -69,13 +63,7 @@ RAW_ALERT_EXPORT_FIELDS = [
     "is_false_positive",
     "is_zero_day",
     "traffic_direction",
-    "local_ip",
-    "remote_ip",
-    "containment_target_ip",
     "is_blocklisted",
-    "blocklist_mode",
-    "blocklisted_at",
-    "blocklist_reason",
 ]
 
 
@@ -177,21 +165,11 @@ def _risk_score(alert: AlertDB, repeat_count: int) -> int:
     return int(min(round(score), 100))
 
 
-def _action_code(alert: AlertDB, family: str, repeat_count: int, risk_score: int) -> str:
-    if alert.is_false_positive:
-        return "FP_AUDIT"
+def _action_code(alert: AlertDB, repeat_count: int, risk_score: int) -> str:
     if alert.is_zero_day:
-        return "MANUAL_ZERO_DAY"
+        return "INVESTIGATE_NOW"
     if risk_score >= 90 or repeat_count >= 10:
         return "INVESTIGATE_NOW"
-    if family == "Brute Force":
-        return "REVIEW_AUTH"
-    if family == "Reconnaissance":
-        return "CHECK_EXPOSURE"
-    if family in {"DoS", "DDoS"}:
-        return "RATE_LIMIT"
-    if family == "Web Attack":
-        return "REVIEW_WEB"
     return "MONITOR"
 
 
@@ -267,7 +245,7 @@ def _mode(values) -> str:
     return Counter(clean).most_common(1)[0][0]
 
 
-def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: str, blocklist: dict[str, dict]) -> dict:
+def _build_alert_summaries(alerts: list[AlertDB], exported_at: str, blocklist: dict[str, dict]) -> dict:
     endpoint_counts = Counter(_endpoint_key(alert) for alert in alerts)
     records = []
 
@@ -284,7 +262,7 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             "risk": risk,
             "endpoint": endpoint,
             "repeat_count": repeat_count,
-            "action_code": _action_code(alert, family, repeat_count, risk),
+            "action_code": _action_code(alert, repeat_count, risk),
             "blocklist": _blocklist_info(alert, blocklist),
         })
 
@@ -293,18 +271,10 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
     zero_day_count = sum(1 for item in records if item["alert"].is_zero_day)
     actionable_count = sum(1 for item in records if not item["alert"].is_false_positive)
     blocklisted_alert_count = sum(1 for item in records if item["blocklist"]["is_blocklisted"])
-    blocklisted_remote_count = len({item["blocklist"]["blocklist_ip"] for item in records if item["blocklist"]["is_blocklisted"]})
     sorted_alerts = sorted(alerts, key=lambda alert: _parse_timestamp_for_sort(alert.timestamp or ""))
-    filter_text = ", ".join(
-        f"{key}={value}" for key, value in filters.items()
-        if value not in (None, "", False)
-    ) or "none"
 
     report_overview = [
         ["exported_at", exported_at],
-        ["filter_used", filter_text],
-        ["requested_window_start", filters.get("from") or ""],
-        ["requested_window_end", filters.get("to") or ""],
         ["actual_first_seen", sorted_alerts[0].timestamp if sorted_alerts else ""],
         ["actual_last_seen", sorted_alerts[-1].timestamp if sorted_alerts else ""],
         ["total_alerts", total],
@@ -312,7 +282,6 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         ["zero_day_count", zero_day_count],
         ["actionable_alerts", actionable_count],
         ["blocklisted_alerts", blocklisted_alert_count],
-        ["blocklisted_remote_endpoints", blocklisted_remote_count],
     ]
     if total == 0:
         report_overview.append(["note", "No alerts matched this export filter"])
@@ -341,13 +310,11 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
     ]
 
     by_src = defaultdict(list)
-    by_dst = defaultdict(list)
     by_remote = defaultdict(list)
     by_endpoint = defaultdict(list)
     for item in records:
         alert = item["alert"]
         by_src[alert.src_ip or "N/A"].append(item)
-        by_dst[alert.dst_ip or "N/A"].append(item)
         remote_ip = getattr(alert, "remote_ip", None) or ""
         if remote_ip and remote_ip.upper() != "N/A":
             by_remote[remote_ip].append(item)
@@ -363,18 +330,6 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
             src_ip,
             len(items),
             len({alert.dst_ip or "N/A" for alert in alerts_in_group}),
-            _mode(item["family"] for item in items),
-            _max_severity(alerts_in_group),
-            max(item["risk"] for item in items),
-        ])
-
-    top_targets = []
-    for dst_ip, items in sorted(by_dst.items(), key=lambda pair: group_sort_key(pair[1]))[:10]:
-        alerts_in_group = [item["alert"] for item in items]
-        top_targets.append([
-            dst_ip,
-            len(items),
-            len({alert.src_ip or "N/A" for alert in alerts_in_group}),
             _mode(item["family"] for item in items),
             _max_severity(alerts_in_group),
             max(item["risk"] for item in items),
@@ -472,7 +427,6 @@ def _build_alert_summaries(alerts: list[AlertDB], filters: dict, exported_at: st
         "family_summary": family_summary,
         "direction_summary": direction_summary,
         "top_sources": top_sources,
-        "top_targets": top_targets,
         "top_remote_endpoints": top_remote_endpoints,
         "blocklist_summary": blocklist_summary,
         "repeated_endpoints": repeated_endpoints,
@@ -541,16 +495,8 @@ async def export_alerts_csv(
     )
 
     exported_at = datetime.now(timezone.utc).isoformat()
-    filters = {
-        "from": from_,
-        "to": to,
-        "severity": severity,
-        "attack_type": attack_type,
-        "include_false_positive": include_false_positive,
-        "zero_day_only": zero_day_only,
-    }
     blocklist = _load_blocklist(db)
-    summaries = _build_alert_summaries(alerts, filters, exported_at, blocklist)
+    summaries = _build_alert_summaries(alerts, exported_at, blocklist)
 
     output = StringIO()
     writer = csv.writer(output, lineterminator="\n")
@@ -562,8 +508,7 @@ async def export_alerts_csv(
         _write_csv_section(writer, "Attack Family Summary", ["attack_family", "count", "percentage"], summaries["family_summary"])
         _write_csv_section(writer, "Direction Summary", ["traffic_direction", "count", "percentage"], summaries["direction_summary"])
         _write_csv_section(writer, "Top Sources", ["src_ip", "alert_count", "unique_targets", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_sources"])
-        _write_csv_section(writer, "Top Targets", ["dst_ip", "alert_count", "unique_sources", "top_attack_family", "max_severity", "max_risk_score"], summaries["top_targets"])
-        _write_csv_section(writer, "Top Remote Endpoints", ["remote_ip", "alert_count", "unique_local_endpoints", "top_attack_family", "max_severity", "max_risk_score", "top_direction", "is_blocklisted", "blocklist_mode", "blocklisted_at"], summaries["top_remote_endpoints"])
+        _write_csv_section(writer, "Top Endpoints", ["ip", "alert_count", "unique_local_endpoints", "top_attack_family", "max_severity", "max_risk_score", "top_direction", "is_blocklisted", "blocklist_mode", "blocklisted_at"], summaries["top_remote_endpoints"])
         _write_csv_section(writer, "Repeated Endpoint Pairs", ["src_ip", "dst_ip", "dst_port", "protocol", "count", "first_seen", "last_seen", "max_severity", "max_risk_score"], summaries["repeated_endpoints"])
         _write_csv_section(writer, "Priority Incidents", ["priority_rank", "alert_id", "timestamp", "severity", "attack_family", "attack_type", "risk_score", "src_ip", "dst_ip", "traffic_direction", "local_ip", "remote_ip", "dst_port", "is_blocklisted", "blocklist_mode", "action_code"], summaries["priority_incidents"])
         _write_csv_section(writer, "Action Legend", ["action_code", "explanation"], summaries["action_legend"])
@@ -623,13 +568,7 @@ async def export_raw_alerts_csv(
             "Yes" if alert.is_false_positive else "No",
             "Yes" if alert.is_zero_day else "No",
             getattr(alert, "traffic_direction", "") or "",
-            getattr(alert, "local_ip", "") or "",
-            getattr(alert, "remote_ip", "") or "",
-            getattr(alert, "containment_target_ip", "") or "",
             "Yes" if block_info["is_blocklisted"] else "No",
-            block_info["blocklist_mode"],
-            block_info["blocklisted_at"],
-            block_info["blocklist_reason"],
         ]
         writer.writerow([_csv_safe(cell) for cell in row])
 
